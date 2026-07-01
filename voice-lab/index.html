@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes — voice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,ital,wght@9..144,0,400;9..144,0,500;9..144,1,400;9..144,1,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--cream:#FFE6CB;--teal:#7be0c8;--gold:#FFD21E;--orange:#ff8a3c;--dim:#7c918c;--red:#ff8a8a;
+        --panel:rgba(255,255,255,0.03);--line:rgba(255,230,203,0.10)}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{font-family:'Inter',sans-serif;color:var(--cream);
+    background:radial-gradient(1100px 720px at 50% -8%,#0e272a,#061613 60%,#04110f 100%);
+    display:flex;flex-direction:column;align-items:center;overflow:hidden}
+  .wrap{width:min(760px,100%);height:100%;display:flex;flex-direction:column;padding:20px 22px 22px}
+
+  /* header */
+  header{display:flex;align-items:center;justify-content:space-between;padding-bottom:12px}
+  .brand{font-family:'Fraunces',serif;font-weight:500;font-size:20px;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+  .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);box-shadow:none;transition:.3s}
+  .brand .dot.on{background:var(--teal);box-shadow:0 0 12px var(--teal)}
+  .pill{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);
+    border:1px solid var(--line);border-radius:99px;padding:5px 11px}
+  .pill.live{color:var(--teal);border-color:rgba(123,224,200,.35)}
+
+  /* hero: orb + live caption */
+  .hero{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:18px;padding:18px 0 14px}
+  .orbwrap{position:relative;width:150px;height:150px;display:grid;place-items:center;animation:bob 5s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(-7px)}}
+  .glow{position:absolute;width:180px;height:180px;border-radius:50%;filter:blur(30px);background:radial-gradient(circle,var(--teal),transparent 68%);opacity:calc(.32 + var(--amp,0)*.7);transition:opacity .15s,background .5s}
+  .orb{position:relative;width:118px;height:118px;border-radius:50%;transform:scale(calc(.9 + var(--amp,0)*.32));transition:transform .08s linear, background .6s ease, box-shadow .6s ease;
+    background:radial-gradient(circle at 37% 30%, #e9fff8 0%, var(--teal) 28%, #2fa39c 62%, #186f6c 100%);
+    box-shadow:inset -9px -11px 26px rgba(0,38,36,.55), inset 7px 9px 20px rgba(255,255,255,.28), 0 0 46px -6px var(--teal)}
+  .orb.idle{background:radial-gradient(circle at 37% 30%,#cfe6e0,#5c7d79 55%,#33514e 100%);box-shadow:inset -9px -11px 26px rgba(0,0,0,.4),0 0 24px -10px #000;filter:saturate(.7)}
+  .orb.thinking{background:radial-gradient(circle at 37% 30%,#fff1c0,var(--gold) 40%,var(--orange) 90%);box-shadow:inset -9px -11px 26px rgba(60,30,0,.4),inset 7px 9px 20px rgba(255,255,255,.3),0 0 48px -4px var(--gold)}
+  .orb.speaking{background:radial-gradient(circle at 37% 30%,#fff6dd,var(--gold) 34%,var(--teal) 92%);box-shadow:inset -9px -11px 26px rgba(40,40,0,.35),inset 7px 9px 20px rgba(255,255,255,.32),0 0 54px -2px var(--gold)}
+  .ring{position:absolute;width:150px;height:150px;border-radius:50%;border:1.5px solid transparent;opacity:0;transition:opacity .3s}
+  .ring.show{opacity:1;border-top-color:var(--gold);border-right-color:rgba(255,210,30,.3);animation:spin 1.1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .caption{min-height:62px;display:flex;align-items:center;justify-content:center;text-align:center;max-width:620px;
+    font-family:'Fraunces',serif;font-size:20px;line-height:1.42;transition:color .25s;padding:0 8px}
+  .caption.you{color:var(--cream);font-style:normal}
+  .caption.hermes{color:var(--gold);font-style:italic}
+  .caption.idle{color:var(--dim);font-size:13px;font-family:'JetBrains Mono',monospace;letter-spacing:.5px}
+  .caption .cursor{display:inline-block;width:2px;height:1em;background:currentColor;margin-left:3px;vertical-align:-2px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* history */
+  .log{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:10px 2px 6px;mask-image:linear-gradient(to bottom,transparent,#000 22px)}
+  .log::-webkit-scrollbar{width:6px} .log::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+  .turn{font-size:14.5px;line-height:1.55;padding:10px 14px;border-radius:15px;max-width:78%;white-space:pre-wrap;animation:rise .35s ease}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .turn.you{align-self:flex-end;background:rgba(123,224,200,0.10);border:1px solid rgba(123,224,200,0.20);border-bottom-right-radius:5px}
+  .turn.hermes{align-self:flex-start;background:rgba(255,210,30,0.07);border:1px solid rgba(255,210,30,0.18);border-bottom-left-radius:5px}
+  .turn .who{display:block;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;opacity:.5;margin-bottom:3px}
+  .empty{margin:auto;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:12px;text-align:center;line-height:1.8}
+  .err{color:var(--red);font-family:'JetBrains Mono',monospace;font-size:11px;text-align:center;min-height:13px;padding:2px}
+
+  /* controls */
+  .controls{flex-shrink:0;display:flex;flex-direction:column;gap:11px;padding-top:6px}
+  .crow{display:flex;gap:10px;align-items:center}
+  .callbtn{flex:1;height:52px;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:15px;cursor:pointer;transition:.18s;
+    border:1px solid rgba(123,224,200,0.4);background:linear-gradient(180deg,rgba(123,224,200,0.14),rgba(123,224,200,0.05));color:var(--cream);font-weight:600;font-size:15px}
+  .callbtn:hover{background:rgba(123,224,200,0.2)}
+  .callbtn:disabled{opacity:.5;cursor:wait}
+  .callbtn.live{border-color:rgba(255,138,138,.5);background:linear-gradient(180deg,rgba(255,138,138,0.16),rgba(255,138,138,0.05));color:#ffd5d5}
+  .callbtn svg{width:18px;height:18px}
+  .vsel{height:52px;border-radius:15px;border:1px solid var(--line);background:var(--panel);color:var(--cream);font-family:'Inter';font-size:13px;padding:0 12px;cursor:pointer;outline:none}
+  .vsel:disabled{opacity:.45}
+  .tin{flex:1;height:48px;border-radius:14px;border:1px solid var(--line);background:var(--panel);color:var(--cream);font-size:14px;padding:0 15px;outline:none}
+  .tin:focus{border-color:rgba(123,224,200,.5)} .tin::placeholder{color:var(--dim)} .tin:disabled{opacity:.45}
+  .send{height:48px;padding:0 18px;border-radius:14px;border:1px solid rgba(255,210,30,.4);background:rgba(255,210,30,.1);color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:13px;cursor:pointer}
+  .send:disabled{opacity:.4;cursor:not-allowed}
+  .foot{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim);text-align:center;letter-spacing:.3px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><span class="dot" id="dot"></span> Hermes</div>
+      <div class="pill" id="pill">offline</div>
+    </header>
+
+    <div class="hero">
+      <div class="orbwrap">
+        <div class="glow" id="glow"></div>
+        <div class="ring" id="ring"></div>
+        <div class="orb idle" id="orb"></div>
+      </div>
+      <div class="caption idle" id="caption">Start a call and just talk — interrupt any time.</div>
+    </div>
+
+    <div class="log" id="log"><div class="empty" id="empty">your conversation will appear here ·<br>newest at the bottom</div></div>
+    <div class="err" id="err"></div>
+
+    <div class="controls">
+      <div class="crow">
+        <button class="callbtn" id="call">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          <span id="calllabel">Start call</span>
+        </button>
+        <select class="vsel" id="voice" title="voice">
+          <option value="marin">Marin</option>
+          <option value="cedar">Cedar</option>
+          <option value="alloy">Alloy</option>
+          <option value="shimmer">Shimmer</option>
+          <option value="ash">Ash</option>
+          <option value="ballad">Ballad</option>
+          <option value="coral">Coral</option>
+          <option value="sage">Sage</option>
+          <option value="verse">Verse</option>
+        </select>
+      </div>
+      <div class="crow">
+        <input class="tin" id="tin" placeholder="…or type a message" disabled>
+        <button class="send" id="send" disabled>Send</button>
+      </div>
+      <div class="foot">openai gpt-realtime · voice layer only (not yet wired to your real agent)</div>
+    </div>
+  </div>
+  <audio id="ai" autoplay></audio>
+
+<script>
+const $=id=>document.getElementById(id);
+const orb=$('orb'),glow=$('glow'),ring=$('ring'),dot=$('dot'),pill=$('pill'),caption=$('caption'),
+      log=$('log'),empty=$('empty'),errEl=$('err'),callBtn=$('call'),callLabel=$('calllabel'),
+      voiceSel=$('voice'),tin=$('tin'),sendBtn=$('send'),aiAudio=$('ai');
+
+let pc=null,dc=null,micStream=null,actx=null,anaUser=null,anaAI=null,rafAmp=0,live=false;
+let userText='',aiText='';
+
+function setState(s){
+  orb.className='orb '+(s==='listening'?'':(s==='thinking'?'thinking':(s==='speaking'?'speaking':'idle')));
+  if(s==='listening') orb.className='orb';
+  ring.className='ring'+(s==='thinking'?' show':'');
+  const labels={listening:'listening',thinking:'thinking',speaking:'speaking',idle:'',offline:''};
+  pill.textContent = s==='offline'?'offline':(s==='idle'?'connected':labels[s]||s);
+  pill.className='pill'+(s!=='offline'&&s!=='idle'?' live':'');
+  dot.className='dot'+(live?' on':'');
+}
+function setCaption(text,who){ caption.className='caption '+(who||'idle'); caption.innerHTML=(text||'')+(who==='you'||who==='hermes'?'<span class="cursor"></span>':''); }
+function showErr(m){ errEl.textContent=m||''; }
+function commit(role,text){ if(!text||!text.trim())return; if(empty&&empty.parentNode)empty.remove();
+  const d=document.createElement('div'); d.className='turn '+role;
+  d.innerHTML='<span class="who">'+(role==='you'?'you':'hermes')+'</span>'+text.trim().replace(/</g,'&lt;');
+  log.appendChild(d); log.scrollTop=log.scrollHeight; }
+
+async function startCall(){
+  showErr(''); setState('offline'); pill.textContent='connecting…'; callBtn.disabled=true;
+  try{
+    const s=await fetch('/api/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:voiceSel.value})}).then(r=>r.json());
+    if(!s.value) throw new Error('no token: '+JSON.stringify(s).slice(0,120));
+    const EK=s.value, model=s.model||'gpt-realtime';
+
+    pc=new RTCPeerConnection();
+    pc.ontrack=e=>{ aiAudio.srcObject=e.streams[0]; aiAudio.play().catch(()=>{}); attachAnalyser(e.streams[0],'ai'); };
+    micStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    pc.addTrack(micStream.getAudioTracks()[0],micStream);
+    attachAnalyser(micStream,'user');
+
+    dc=pc.createDataChannel('oai-events');
+    dc.onopen=()=>{ live=true; callBtn.disabled=false; callBtn.classList.add('live'); callLabel.textContent='End call';
+      tin.disabled=false; sendBtn.disabled=false; voiceSel.disabled=true;
+      setState('listening'); setCaption('listening…','idle'); pumpAmp(); };
+    dc.onmessage=onEvent;
+
+    const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
+    const ans=await fetch('https://api.openai.com/v1/realtime/calls?model='+encodeURIComponent(model),
+      {method:'POST',body:offer.sdp,headers:{Authorization:'Bearer '+EK,'Content-Type':'application/sdp'}});
+    if(!ans.ok) throw new Error('sdp '+ans.status+': '+(await ans.text()).slice(0,120));
+    await pc.setRemoteDescription({type:'answer',sdp:await ans.text()});
+  }catch(e){ showErr(e.message||String(e)); endCall(true); }
+}
+
+function onEvent(e){
+  let m; try{ m=JSON.parse(e.data); }catch{ return; }
+  switch(m.type){
+    case 'input_audio_buffer.speech_started':
+      userText=''; setState('listening'); setCaption('','you'); break;
+    case 'conversation.item.input_audio_transcription.delta':
+      userText+=(m.delta||''); setCaption(userText,'you'); break;
+    case 'conversation.item.input_audio_transcription.completed':
+      commit('you', m.transcript||userText); userText=''; setCaption('thinking…','idle'); break;
+    case 'input_audio_buffer.speech_stopped':
+      setState('thinking'); break;
+    case 'response.created':
+      aiText=''; setState('thinking'); setCaption('','hermes'); break;
+    case 'response.output_audio_transcript.delta':
+    case 'response.audio_transcript.delta':
+      aiText+=(m.delta||''); setState('speaking'); setCaption(aiText,'hermes'); break;
+    case 'response.done':
+      commit('hermes', aiText); aiText=''; if(live){ setState('listening'); setCaption('listening…','idle'); } break;
+    case 'error':
+      showErr((m.error&&(m.error.message||m.error.code))||'realtime error'); break;
+  }
+}
+
+function sendText(){ const t=tin.value.trim(); if(!t||!dc||dc.readyState!=='open')return; tin.value='';
+  commit('you',t);
+  dc.send(JSON.stringify({type:'conversation.item.create',item:{type:'message',role:'user',content:[{type:'input_text',text:t}]}}));
+  dc.send(JSON.stringify({type:'response.create'})); }
+
+function attachAnalyser(stream,which){ try{ actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+  const a=actx.createAnalyser(); a.fftSize=512; actx.createMediaStreamSource(stream).connect(a);
+  if(which==='user')anaUser=a; else anaAI=a; }catch{} }
+function rms(a){ if(!a)return 0; const d=new Uint8Array(a.fftSize); a.getByteTimeDomainData(d); let s=0; for(let i=0;i<d.length;i++){const x=(d[i]-128)/128;s+=x*x;} return Math.min(1,Math.sqrt(s/d.length)*4); }
+function pumpAmp(){ const amp=Math.max(rms(anaUser),rms(anaAI)); orb.style.setProperty('--amp',amp.toFixed(3)); glow.style.setProperty('--amp',amp.toFixed(3)); rafAmp=requestAnimationFrame(pumpAmp); }
+
+function endCall(silent){ live=false; cancelAnimationFrame(rafAmp); orb.style.setProperty('--amp',0); glow.style.setProperty('--amp',0);
+  try{dc&&dc.close()}catch{} try{pc&&pc.close()}catch{} try{micStream&&micStream.getTracks().forEach(t=>t.stop())}catch{} try{actx&&actx.close()}catch{}
+  pc=dc=micStream=actx=anaUser=anaAI=null;
+  callBtn.classList.remove('live'); callBtn.disabled=false; callLabel.textContent='Start call';
+  tin.disabled=true; sendBtn.disabled=true; voiceSel.disabled=false;
+  setState('offline'); if(!silent) setCaption('call ended — tap to start again','idle'); }
+
+callBtn.addEventListener('click',()=>{ live?endCall():startCall(); });
+sendBtn.addEventListener('click',sendText);
+tin.addEventListener('keydown',e=>{ if(e.key==='Enter') sendText(); });
+setState('offline');
+</script>
+</body>
+</html>

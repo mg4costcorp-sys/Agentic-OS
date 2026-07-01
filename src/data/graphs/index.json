@@ -1,0 +1,68 @@
+[
+  {
+    "id": "power-design",
+    "name": "power-design",
+    "description": "Example project — a public repo graphed with graphify",
+    "path": "git:power-design",
+    "lang": "Code",
+    "color": "#7be0c8",
+    "nodeCount": 2935,
+    "edgeCount": 2858,
+    "communities": 88,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "Design Principles for Codified Slide Generation",
+        "degree": 17
+      },
+      {
+        "name": "Components",
+        "degree": 15
+      },
+      {
+        "name": "brand-style.md",
+        "degree": 12
+      }
+    ],
+    "graphPath": "/Users/matthieu/Agentic-OS/src/data/graphs/power-design.json"
+  },
+  {
+    "id": "agentic-os",
+    "name": "Agentic-OS",
+    "description": "Ingested from ~/Agentic-OS",
+    "path": "/Users/matthieu/Agentic-OS",
+    "graphPath": "/Users/matthieu/Agentic-OS/src/data/graphs/agentic-os.json",
+    "lang": "TypeScript",
+    "color": "#60a5fa",
+    "nodeCount": 1600,
+    "edgeCount": 2211,
+    "communities": 102,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "agents.hermes.tsx",
+        "degree": 143
+      },
+      {
+        "name": "aggregate.ts",
+        "degree": 95
+      },
+      {
+        "name": "index.tsx",
+        "degree": 83
+      },
+      {
+        "name": "cn()",
+        "degree": 75
+      },
+      {
+        "name": "setup.tsx",
+        "degree": 72
+      },
+      {
+        "name": "model-intelligence.tsx",
+        "degree": 61
+      }
+    ]
+  }
+]

@@ -1,0 +1,110 @@
+Claude OS — Personal & Commercial Use License with Attribution
+================================================================
+
+Copyright (c) 2026 Jack Roberts. All rights reserved.
+
+This software is distributed to members of Jack Roberts' community for
+personal use AND commercial use in their own work (including client
+projects, freelance deliverables, and internal company tooling),
+subject to the conditions below.
+
+YOU MAY:
+  ✓ Use this software on machines you own or control
+  ✓ Modify it for your own use
+  ✓ Use it in commercial work — client projects, freelance jobs,
+    your day job, your own startup's internal tooling
+  ✓ Run it indefinitely on any number of personal or work machines
+
+YOU MUST:
+  ★ Provide visible attribution to "Claude OS by Jack Roberts" in any
+    public deliverable, presentation, blog post, video, social-media
+    post, or product page where this software materially contributed
+    to the work, with a link to:
+       https://github.com/ItsssssJack/claude-operating-system
+    A single line in the README, footer, credits screen, or
+    description is sufficient. Internal-only use (purely within your
+    own organisation, not shown to the public) does not require
+    attribution but it is appreciated.
+
+YOU MAY NOT:
+  ✗ Sell, rent, sublicense, or otherwise charge anyone for this
+    software (modified or unmodified)
+  ✗ Redistribute this software to anyone outside your own organisation
+    (whether publicly, privately, modified, or unmodified)
+  ✗ Re-upload this software to GitHub, GitLab, Bitbucket, package
+    registries (npm, pip, etc.), marketplaces, course platforms, or
+    any public or third-party source
+  ✗ Repackage this software — in whole or in substantial part — as a
+    product, course, template, starter kit, boilerplate, or similar
+    offering for distribution (free or paid)
+  ✗ Provide this software as a hosted/SaaS service to third parties
+  ✗ Remove this license notice or claim authorship of the software
+  ✗ Use the name "Claude OS" or the maintainer's name to market your
+    own product, service, course, or community
+  ✗ Use this software to build, train, or improve a competing
+    operator dashboard or AI-stack-observability product intended for
+    redistribution
+  ✗ Grant, sell, lend, bundle, or condition access to this software —
+    or to any hosted, deployed, or running instance of it — to or for
+    any third party, including behind any paywall, membership,
+    subscription, Discord or other community, cohort, course, bootcamp,
+    mentorship, or "done-for-you" offering. Access is for you and your
+    own organisation only; you may not make it a perk, benefit, bonus,
+    or deliverable of any paid or free community or program.
+
+TERMINATION
+  This license and every right it grants terminate automatically and
+  immediately, without notice, the moment you breach any term. On
+  termination you must stop all use and destroy all copies in your
+  possession or control. The restrictions, attribution duties, and the
+  sections below survive termination. Termination is in addition to —
+  not in place of — any other remedy available to the copyright holder.
+
+ENFORCEMENT & REMEDIES
+  You acknowledge that unauthorised redistribution, resale, repackaging,
+  or community-gated access causes irreparable harm for which money
+  damages alone are inadequate, and that the copyright holder is
+  entitled to seek injunctive relief (to stop the conduct and compel
+  takedown) in addition to damages, plus recovery of any profits
+  derived from the infringement and reasonable legal costs. Nothing in
+  the "AS IS" / liability paragraph below limits the copyright holder's
+  right to enforce this license or the underlying copyright and
+  trademarks.
+
+COMMERCIAL / REDISTRIBUTION LICENSE
+  The rights above do NOT include redistribution, resale, repackaging,
+  hosting-for-others, or community-gated access. If you want to do any
+  of those, you must obtain a separate written license from the author
+  first. Enquire via the project page:
+  https://github.com/ItsssssJack/claude-operating-system
+
+RESERVATION OF RIGHTS
+  All rights not expressly granted above are reserved by the author. No
+  right is granted by implication, estoppel, or otherwise. This license
+  is personal to the individual or organisation that obtained the
+  software directly from the author and may not be assigned or
+  transferred.
+
+GOVERNING LAW
+  This license is governed by the laws of England and Wales, and any
+  dispute is subject to the exclusive jurisdiction of its courts.
+  (Maintainer: set this to your own jurisdiction if different.)
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY
+CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+────────────────────────────────────────────────────────────────────
+Plain-English summary (not legally binding — see terms above):
+
+  Use it on every machine you own. Use it for client work and your
+  day job. Modify it however you want. Just credit me where the work
+  is shown publicly. Don't repackage or resell it, and don't hand it
+  out or gate it behind your own paid (or free) community, course, or
+  Discord — that needs a separate license from me. Break the terms and
+  this license ends automatically.
+────────────────────────────────────────────────────────────────────

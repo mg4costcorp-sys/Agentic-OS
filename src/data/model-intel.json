@@ -1,0 +1,2269 @@
+{
+  "$schema": "claude-os/model-intel/v1",
+  "_readme": {
+    "what": "Routing-oriented model knowledge base for AI agents and the Model Intelligence panel. The panel is a typeset rendering of THIS file — same ids, same values. As an agent, read this whole object before routing: pick a model by matching a task against each model's bestFor (and not avoidFor), then break ties by price (price.inputPerM/outputPerM, USD per million tokens — lower is cheaper), speed (speedTps, output tokens/sec — higher is faster/lower-latency), context (max input window in tokens — bigger fits more code/docs), and benchmarks (benchmarks.aaIndex is the headline intelligence score, higher = smarter; sweBench/lmarenaElo for coding).",
+    "howAgentsUse": "1) Filter models to roster.inPlay===true (the user's hard gate — never route to an out-of-roster or status==='fading' model). 2) Match the task to bestFor and exclude any avoidFor. 3) Use tier ('frontier' = top intelligence, 'fast' = low-latency cheap, 'open' = open-weight value, 'specialist' = task-tuned) and the `routing` rules to choose. 4) Break ties with price/speedTps/context/benchmarks. Quote `freshness.snapshot.curatedAsOf` when citing sentiment/benchmarks; price/context/speedTps may be fresher (see `freshness.live`). Consult `picks` for fast canned routing (smartest / proFavorite / fastest / cheapest / rising).",
+    "fieldProvenance": "Every drift-prone field is tagged via top-level `freshness.liveFields` (overwritten from OpenRouter at render) vs everything else (curated, dated to freshness.snapshot.curatedAsOf). Per-model `liveFields` records what actually merged this render; nulls fall back to curated values.",
+    "humanControl": "roster.inPlay is the ONLY user-authored field (localStorage key claude-os-model-roster). It is the agent's hard gate — do not route where inPlay===false."
+  },
+  "asOf": "2026-06-08",
+  "generatedAt": "2026-06-08T00:00:00Z",
+  "freshness": {
+    "live": {
+      "source": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1/models",
+      "fetchedAt": null,
+      "status": "ok",
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ]
+    },
+    "snapshot": {
+      "curatedAsOf": "2026-06",
+      "by": "operator",
+      "curatedFields": [
+        "benchmarks",
+        "sentiment",
+        "proUsage",
+        "bestFor",
+        "avoidFor",
+        "strengths",
+        "weaknesses",
+        "status",
+        "picks",
+        "upAndComing",
+        "popularity"
+      ]
+    }
+  },
+  "routing": {
+    "default": "claude-opus-4-8",
+    "rules": [
+      "Hardest reasoning / multi-file refactor → highest benchmarks.aaIndex frontier model with roster.inPlay===true.",
+      "High-volume or latency-critical → cheapest in-roster model with speedTps>=80 and tier in ['fast','open'].",
+      "Never route where roster.inPlay===false or status==='fading'."
+    ]
+  },
+  "leaderboards": [
+    {
+      "label": "OpenRouter Rankings",
+      "url": "https://openrouter.ai/rankings"
+    },
+    {
+      "label": "Artificial Analysis",
+      "url": "https://artificialanalysis.ai/leaderboards/models"
+    },
+    {
+      "label": "LMArena",
+      "url": "https://lmarena.ai/leaderboard"
+    },
+    {
+      "label": "Aider Polyglot",
+      "url": "https://aider.chat/docs/leaderboards/"
+    },
+    {
+      "label": "SWE-bench",
+      "url": "https://www.swebench.com/"
+    }
+  ],
+  "picks": [
+    {
+      "slot": "smartest",
+      "modelId": "claude-opus-4-8",
+      "label": "Smartest",
+      "metric": "AA Index 61",
+      "reason": "#1 on the Artificial Analysis Intelligence Index (61) and the runaway practitioner default for production work."
+    },
+    {
+      "slot": "proFavorite",
+      "modelId": "claude-opus-4-8",
+      "label": "Pros reach for",
+      "metric": "Cursor + CC default",
+      "reason": "Best long-horizon agentic coding and reliability; ~4x less likely than 4.7 to let its own code flaws pass."
+    },
+    {
+      "slot": "fastest",
+      "modelId": "gemini-3-5-flash",
+      "label": "Fastest",
+      "metric": "280+ tps",
+      "reason": "Near-fastest output (280+ t/s) with Index 55 — best speed/intelligence blend of the fast tier."
+    },
+    {
+      "slot": "cheapest",
+      "modelId": "deepseek-v4-flash",
+      "label": "Best value",
+      "metric": "$0.10/$0.20 per M",
+      "reason": "#1 model on OpenRouter by volume at just $0.10/$0.20 per M with 1M context — the cheapest credible agentic brain."
+    },
+    {
+      "slot": "rising",
+      "modelId": "minimax-m3",
+      "label": "Up & coming",
+      "metric": "new this month",
+      "reason": "Best intelligence-per-dollar on the AA leaderboard; #3 overall and #2 in coding on OpenRouter within a week of launch."
+    }
+  ],
+  "curatedPicks": {
+    "bestOverall": {
+      "id": "claude-opus-4-8",
+      "reason": "#1 on the Artificial Analysis Intelligence Index (61) and the runaway practitioner default for production work."
+    },
+    "bestCoding": {
+      "id": "claude-opus-4-7",
+      "reason": "#1 on LMArena WebDev/Code (1567) and the Terminal-Bench 2.0 champion (90.2%); Opus 4.8 is its close, newer sibling."
+    },
+    "bestCheapFast": {
+      "id": "deepseek-v4-flash",
+      "reason": "#1 model on OpenRouter by volume at just $0.10/$0.20 per M with 1M context — the cheapest credible agentic brain."
+    },
+    "bestLongContext": {
+      "id": "grok-4-20",
+      "reason": "Largest context window of the frontier set at 2,000,000 tokens, at cheap-output pricing."
+    },
+    "bestOpenWeight": {
+      "id": "kimi-k2-6",
+      "reason": "The only non-Western model rated 'Tier-A with no caveats' — uniquely stable over 4,000+ tool calls / 13-hour agent runs."
+    },
+    "bestForAgents": {
+      "id": "claude-opus-4-8",
+      "reason": "Best long-horizon agentic coding and reliability; ~4x less likely than 4.7 to let its own code flaws pass."
+    }
+  },
+  "models": [
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "vendor": "Anthropic",
+      "vendorKey": "claude",
+      "openrouterId": "anthropic/claude-opus-4.8",
+      "tier": "frontier",
+      "status": "new",
+      "oneLiner": "Anthropic's flagship and the practitioner default for production and long-horizon agentic coding.",
+      "price": {
+        "inputPerM": 5,
+        "outputPerM": 25,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": 67,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1479,
+        "aaIndex": 61,
+        "aiderPolyglot": null,
+        "sweBench": 88.6
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "very positive",
+        "score": 0.92,
+        "summary": "The runaway practitioner favorite for production and agentic coding; the gripes are price and a cautious tone, not capability.",
+        "loved": [
+          "Best agentic/SWE coding and long-context reliability on monorepos and long agent runs",
+          "Tops the Artificial Analysis Intelligence Index (61)",
+          "Favorite inside Cursor and Claude Code; 'textbook-correct code, impeccable architecture'",
+          "~4x less likely than Opus 4.7 to let its own code flaws pass"
+        ],
+        "gripes": [
+          "Most expensive frontier option at $5/$25 per M",
+          "High-effort (xhigh/max) modes burn lots of tokens",
+          "More cautious/hedging tone than GPT",
+          "Newer tokenizer 'optimizes aggressively, sometimes cutting corners'"
+        ]
+      },
+      "strengths": [
+        "Agentic coding and tool use",
+        "Long-context reliability over long sessions",
+        "Top overall reasoning intelligence"
+      ],
+      "weaknesses": [
+        "Highest token cost of the frontier tier",
+        "Cautious/hedging tone",
+        "Slow first token in max-reasoning mode (31s TTFT)"
+      ],
+      "bestFor": [
+        "Production coding",
+        "Long-horizon agentic workflows",
+        "Complex multi-file refactors",
+        "Hardest reasoning tasks"
+      ],
+      "avoidFor": [
+        "High-volume/cheap-throughput loops",
+        "Latency-critical interactive UX",
+        "Budget-constrained projects"
+      ],
+      "proUsage": "Reserved as the premium 'hard task' brain — pros route the toughest reasoning/coding to it and fall back to cheaper open models for volume.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/anthropic/claude-opus-4.8",
+        "vendor": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "leaderboard": "https://artificialanalysis.ai/leaderboards/models"
+      },
+      "popularity": 4
+    },
+    {
+      "id": "claude-opus-4-7",
+      "name": "Claude Opus 4.7",
+      "vendor": "Anthropic",
+      "vendorKey": "claude",
+      "openrouterId": "anthropic/claude-opus-4.7",
+      "tier": "frontier",
+      "status": "stable",
+      "oneLiner": "Prior Anthropic flagship and still the most-used premium coding model in real OpenRouter traffic.",
+      "price": {
+        "inputPerM": 5,
+        "outputPerM": 25,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": 54,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1493,
+        "aaIndex": 57,
+        "aiderPolyglot": null,
+        "sweBench": 82
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "very positive",
+        "score": 0.92,
+        "summary": "The proven workhorse of premium coding; #1 on the LMArena WebDev/Code board and the live Terminal-Bench champion.",
+        "loved": [
+          "#1 WebDev/Code on LMArena (1567)",
+          "Terminal-Bench 2.0 champion at 90.2% (vix agent)",
+          "Highest-ranked premium closed model in real OpenRouter coding usage",
+          "Battle-tested in agent harnesses"
+        ],
+        "gripes": [
+          "Same premium price as 4.8 with slightly lower top-line intelligence",
+          "Superseded by 4.8 for the hardest reasoning"
+        ]
+      },
+      "strengths": [
+        "WebDev/code generation",
+        "Terminal/agentic task completion",
+        "Mature tooling ecosystem"
+      ],
+      "weaknesses": [
+        "No longer the top intelligence tier",
+        "Premium pricing"
+      ],
+      "bestFor": [
+        "WebDev and front-end coding",
+        "Terminal/agent tasks",
+        "Production engineering"
+      ],
+      "avoidFor": [
+        "Cheapest-possible throughput",
+        "When 4.8's extra reasoning headroom is needed"
+      ],
+      "proUsage": "Still the default premium coding model in many agent harnesses; pros keep it for proven WebDev/terminal reliability.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/anthropic/claude-opus-4.7",
+        "vendor": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "leaderboard": "https://lmarena.ai/leaderboard/code"
+      },
+      "popularity": 14
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "vendor": "Anthropic",
+      "vendorKey": "claude",
+      "openrouterId": "anthropic/claude-sonnet-4.6",
+      "tier": "frontier",
+      "status": "stable",
+      "oneLiner": "Anthropic's mid/workhorse tier — best speed/intelligence balance and the writing & voice-fidelity specialist.",
+      "price": {
+        "inputPerM": 3,
+        "outputPerM": 15,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": 61,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1470,
+        "aaIndex": 52,
+        "aiderPolyglot": null,
+        "sweBench": 79.6
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The writing and voice-fidelity specialist at a fair price; the 'smart-but-cheap' workhorse pick.",
+        "loved": [
+          "Best-in-class writing style, voice fidelity and literal instruction-following",
+          "Strong GDPval Elo",
+          "Affordable at $3/$15 per M",
+          "Highest-ranked Western model by raw OpenRouter token volume (#6 overall)"
+        ],
+        "gripes": [
+          "Not the strongest pure reasoner",
+          "Weaker agentic/tool ceiling than Opus"
+        ]
+      },
+      "strengths": [
+        "Writing and voice fidelity",
+        "Instruction-following",
+        "Balanced cost/quality for production"
+      ],
+      "weaknesses": [
+        "Lower agentic ceiling than Opus",
+        "Not a top pure reasoner"
+      ],
+      "bestFor": [
+        "Default production work",
+        "Copywriting and voice-sensitive text",
+        "Mid-tier coding"
+      ],
+      "avoidFor": [
+        "Hardest reasoning or longest agent runs"
+      ],
+      "proUsage": "The everyday production driver — pros run it for most coding and writing, escalating to Opus only for the hardest jobs.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/anthropic/claude-sonnet-4.6",
+        "vendor": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "leaderboard": "https://lmarena.ai/leaderboard/code"
+      },
+      "popularity": 2
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "name": "Claude Haiku 4.5",
+      "vendor": "Anthropic",
+      "vendorKey": "claude",
+      "openrouterId": "anthropic/claude-haiku-4.5",
+      "tier": "fast",
+      "status": "stable",
+      "oneLiner": "Anthropic's fast near-frontier tier for high-volume classification, routing and code review.",
+      "price": {
+        "inputPerM": 1,
+        "outputPerM": 5,
+        "currency": "USD"
+      },
+      "context": 200000,
+      "speedTps": 97,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "Anthropic's fastest model — the cheap, low-latency option for high-throughput tasks.",
+        "loved": [
+          "~97 tok/s throughput",
+          "$1/$5 per M pricing",
+          "Near-frontier quality for a fast tier"
+        ],
+        "gripes": [
+          "200K context vs the 1M of the bigger Claude tiers",
+          "Not for hard reasoning"
+        ]
+      },
+      "strengths": [
+        "Low latency",
+        "High-volume classification and routing",
+        "Cheap code review"
+      ],
+      "weaknesses": [
+        "Smaller 200K context",
+        "Limited deep reasoning"
+      ],
+      "bestFor": [
+        "Classification",
+        "Routing",
+        "Code review at scale",
+        "Cheap Claude-quality throughput"
+      ],
+      "avoidFor": [
+        "Complex reasoning",
+        "Very long context tasks"
+      ],
+      "proUsage": "Used as the cheap Claude tier for routing/classification and first-pass code review inside larger pipelines.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/anthropic/claude-haiku-4.5",
+        "vendor": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "leaderboard": null
+      },
+      "popularity": 17
+    },
+    {
+      "id": "gpt-5-5",
+      "name": "GPT-5.5",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.5",
+      "tier": "frontier",
+      "status": "stable",
+      "oneLiner": "OpenAI's current flagship and the trusted, lower-hallucination daily driver developers benchmark against.",
+      "price": {
+        "inputPerM": 5,
+        "outputPerM": 30,
+        "currency": "USD"
+      },
+      "context": 1050000,
+      "speedTps": 67,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1474,
+        "aaIndex": 60,
+        "aiderPolyglot": null,
+        "sweBench": 82.6
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The reliable, lower-hallucination daily driver; live SWE-bench Verified champion, dinged on cost and 'incremental' feel.",
+        "loved": [
+          "Top of the Vals.ai SWE-bench Verified board (82.6%)",
+          "~52% fewer hallucinated claims than GPT-5.3",
+          "Leads FrontierMath; strong agentic coding/debugging",
+          "40% cheaper + 20% faster than 5.4 at similar quality"
+        ],
+        "gripes": [
+          "Some call it 'GPT-5.4 with a new label'",
+          "Less expressive than Sonnet for style",
+          "GPT-5.5 Pro at $100/mo is steep; 2x the price of 5.4"
+        ]
+      },
+      "strengths": [
+        "Factual reliability / low hallucination",
+        "Agentic coding and debugging",
+        "Math/reasoning"
+      ],
+      "weaknesses": [
+        "High output price ($30/M)",
+        "Less stylistically expressive",
+        "Perceived incremental over 5.4"
+      ],
+      "bestFor": [
+        "Everyday production coding",
+        "Research and document workflows",
+        "Factual/agentic tasks"
+      ],
+      "avoidFor": [
+        "Style-heavy writing",
+        "Cheapest throughput loops"
+      ],
+      "proUsage": "The trusted general-purpose driver — pros use it for reliable coding/agentic work and as the benchmark baseline.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.5",
+        "vendor": "https://openai.com/index/introducing-gpt-5-5/",
+        "leaderboard": "https://www.vals.ai/benchmarks/swebench"
+      },
+      "popularity": 5
+    },
+    {
+      "id": "gpt-5-5-pro",
+      "name": "GPT-5.5 Pro",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.5-pro",
+      "tier": "frontier",
+      "status": "stable",
+      "oneLiner": "OpenAI's max-reasoning tier — the most expensive model in the catalog, reserved for the hardest problems.",
+      "price": {
+        "inputPerM": 30,
+        "outputPerM": 180,
+        "currency": "USD"
+      },
+      "context": 1050000,
+      "speedTps": null,
+      "liveFields": [
+        "price",
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "Maximum-reasoning tier that pros respect but few run at scale — the $30/$180 pricing and $100/mo Pro plan are the sticking point.",
+        "loved": [
+          "Highest reasoning effort tier OpenAI offers",
+          "Top scores on the hardest reasoning evals"
+        ],
+        "gripes": [
+          "Most expensive model in the catalog at $30/$180 per M",
+          "$100/mo Pro plan is steep",
+          "Overkill for routine work"
+        ]
+      },
+      "strengths": [
+        "Maximum reasoning depth",
+        "Hardest math/science problems"
+      ],
+      "weaknesses": [
+        "Extreme cost",
+        "Slow and overkill for routine tasks"
+      ],
+      "bestFor": [
+        "Hardest one-off reasoning",
+        "Research-grade problems"
+      ],
+      "avoidFor": [
+        "Any routine or high-volume work",
+        "Cost-sensitive use"
+      ],
+      "proUsage": "Pulled out only for the single hardest reasoning problems where cost is no object.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.5-pro",
+        "vendor": "https://openai.com/index/introducing-gpt-5-5/",
+        "leaderboard": null
+      },
+      "popularity": 25
+    },
+    {
+      "id": "gpt-5-5-instant",
+      "name": "GPT-5.5 Instant",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.5-instant",
+      "tier": "fast",
+      "status": "new",
+      "oneLiner": "ChatGPT's new default model — a fast workhorse with reduced hallucinations and better personalization.",
+      "price": {
+        "inputPerM": null,
+        "outputPerM": null,
+        "currency": "USD"
+      },
+      "context": 400000,
+      "speedTps": null,
+      "liveFields": [
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1275,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "lmarenaElo",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The new ChatGPT default for all users — fast and reliable, with the caveat of a trimmed context and older cutoff.",
+        "loved": [
+          "Default model for every ChatGPT user since May 5",
+          "Fast with reduced hallucinations",
+          "Better personalization"
+        ],
+        "gripes": [
+          "Instant tier trims context to 400K with an older cutoff",
+          "Not a deep-reasoning tier"
+        ]
+      },
+      "strengths": [
+        "Speed",
+        "Reliability for everyday chat",
+        "Mass-default availability"
+      ],
+      "weaknesses": [
+        "Reduced 400K context",
+        "Older knowledge cutoff",
+        "Not for hard reasoning"
+      ],
+      "bestFor": [
+        "Everyday chat",
+        "Fast interactive assistance"
+      ],
+      "avoidFor": [
+        "Long-context tasks",
+        "Hardest reasoning"
+      ],
+      "proUsage": "The mass-market fast default; pros mostly hit GPT-5.5 proper for serious work rather than Instant.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.5-instant",
+        "vendor": "https://techcrunch.com/2026/05/05/openai-releases-gpt-5-5-instant-a-new-default-model-for-chatgpt/",
+        "leaderboard": "https://lmarena.ai/leaderboard/vision"
+      },
+      "popularity": 19
+    },
+    {
+      "id": "gpt-5-4-nano",
+      "name": "GPT-5.4 Nano",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.4-nano",
+      "tier": "fast",
+      "status": "stable",
+      "oneLiner": "OpenAI's cheapest API tier — the budget GPT for high-volume, simple tasks.",
+      "price": {
+        "inputPerM": 0.2,
+        "outputPerM": 1.25,
+        "currency": "USD"
+      },
+      "context": 400000,
+      "speedTps": null,
+      "liveFields": [
+        "price",
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The cheapest GPT-5.x tier — the go-to OpenAI option when cost matters more than depth.",
+        "loved": [
+          "$0.20/$1.25 per M — cheapest GPT-5.x",
+          "400K context",
+          "Cheap OpenAI brand quality"
+        ],
+        "gripes": [
+          "Limited reasoning",
+          "Outclassed on quality by Chinese open-weight value tiers"
+        ]
+      },
+      "strengths": [
+        "Lowest OpenAI price",
+        "High-volume simple tasks"
+      ],
+      "weaknesses": [
+        "Shallow reasoning",
+        "Beaten on price/quality by open-weight models"
+      ],
+      "bestFor": [
+        "High-volume classification",
+        "Simple extraction",
+        "Cheap OpenAI fallback"
+      ],
+      "avoidFor": [
+        "Reasoning or coding depth"
+      ],
+      "proUsage": "A cheap OpenAI fallback for simple high-volume calls when staying in the OpenAI ecosystem.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.4-nano",
+        "vendor": "https://platform.openai.com/docs/models",
+        "leaderboard": null
+      },
+      "popularity": 15
+    },
+    {
+      "id": "gpt-5-3-codex",
+      "name": "GPT-5.3 Codex",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.3-codex",
+      "tier": "specialist",
+      "status": "stable",
+      "oneLiner": "OpenAI's coding-specialized line, tuned for high-effort agentic software tasks.",
+      "price": {
+        "inputPerM": 1.75,
+        "outputPerM": 14,
+        "currency": "USD"
+      },
+      "context": 400000,
+      "speedTps": 111,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": 54,
+        "aiderPolyglot": null,
+        "sweBench": 78
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "OpenAI's dedicated coding model — strong on standardized SWE-bench, with very slow first-token times at high reasoning effort.",
+        "loved": [
+          "Coding-specialized tuning",
+          "78.0% on Vals.ai SWE-bench Verified",
+          "Good throughput once started (111 t/s)"
+        ],
+        "gripes": [
+          "Very high latency at xhigh effort (~103s TTFT)",
+          "Mid-pack vs the newest frontier on top-line intelligence"
+        ]
+      },
+      "strengths": [
+        "Software engineering tasks",
+        "Codex/CLI harness integration"
+      ],
+      "weaknesses": [
+        "Slow first token at high effort",
+        "Not a general frontier tier"
+      ],
+      "bestFor": [
+        "Agentic coding via Codex CLI",
+        "Repo-scale software tasks"
+      ],
+      "avoidFor": [
+        "Latency-sensitive interactive coding",
+        "Non-coding reasoning"
+      ],
+      "proUsage": "Run through the Codex CLI for autonomous software tasks where its coding tuning earns the slow-but-thorough tradeoff.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.3-codex",
+        "vendor": "https://platform.openai.com/docs/models",
+        "leaderboard": "https://www.tbench.ai/leaderboard/terminal-bench/2.0"
+      },
+      "popularity": 13
+    },
+    {
+      "id": "gemini-3-1-pro",
+      "name": "Gemini 3.1 Pro Preview",
+      "vendor": "Google",
+      "vendorKey": "gemini",
+      "openrouterId": "google/gemini-3.1-pro-preview",
+      "tier": "frontier",
+      "status": "stable",
+      "oneLiner": "Google's available frontier reasoning model — the accuracy/reasoning leader with strong value pricing.",
+      "price": {
+        "inputPerM": 2,
+        "outputPerM": 12,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": 143,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1488,
+        "aaIndex": 57,
+        "aiderPolyglot": null,
+        "sweBench": 78.8
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "The accuracy/reasoning champion (GPQA-Diamond and HLE leader) that polarizes builders on coding quality and quotas.",
+        "loved": [
+          "Tops the hardest reasoning tests — GPQA-Diamond 94.1%",
+          "Native Google Search grounding",
+          "Huge-context improvements praised on HN",
+          "Strong value at $2/$12 per M, 143 t/s"
+        ],
+        "gripes": [
+          "Blunt HN criticism on coding quality vs its reasoning",
+          "In-app API quotas and rate limits frustrate heavy users",
+          "'Accuracy leader constrained by artificial usage limits'"
+        ]
+      },
+      "strengths": [
+        "Hardest reasoning and science (GPQA/HLE)",
+        "Full multimodal incl. audio/video",
+        "Search grounding",
+        "Fast for its tier"
+      ],
+      "weaknesses": [
+        "Coding quality lags its reasoning",
+        "Rate limits/quotas",
+        "Preview status"
+      ],
+      "bestFor": [
+        "Hard reasoning and research",
+        "Multimodal incl. audio/video",
+        "Grounded factual Q&A"
+      ],
+      "avoidFor": [
+        "Heavy quota-sensitive workloads",
+        "Top-tier coding (use Claude)"
+      ],
+      "proUsage": "Pulled in for the hardest reasoning, multimodal and search-grounded tasks; pros route coding elsewhere.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/google/gemini-3.1-pro-preview",
+        "vendor": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-pro",
+        "leaderboard": "https://artificialanalysis.ai/evaluations/gpqa-diamond"
+      },
+      "popularity": 9
+    },
+    {
+      "id": "gemini-3-5-flash",
+      "name": "Gemini 3.5 Flash",
+      "vendor": "Google",
+      "vendorKey": "gemini",
+      "openrouterId": "google/gemini-3.5-flash",
+      "tier": "fast",
+      "status": "new",
+      "oneLiner": "Google's speed-leading agentic Flash — 'the Flash that beat last year's Pro', now the flashpoint of the price-hike debate.",
+      "price": {
+        "inputPerM": 1.5,
+        "outputPerM": 9,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": 280,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1477,
+        "aaIndex": 55,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "Loved on capability and speed, but its 3x price hike became the year's loudest gripe and the emblem of 'the era of cheap AI is ending'.",
+        "loved": [
+          "'The Flash that beat last year's Pro'",
+          "280+ t/s with Index 55 — best speed/intelligence blend",
+          "Full multimodal incl. audio/video",
+          "Free in the Gemini app; Google's pick to power 'everything'"
+        ],
+        "gripes": [
+          "3x input price increase ($1.50/$9) over Gemini 3 Flash Preview — Simon Willison + HN made it the loudest thread of spring",
+          "Effective cost ~5x higher due to token usage",
+          "Some report an 'IQ drop' vs expectations"
+        ]
+      },
+      "strengths": [
+        "Near-fastest output (280+ t/s)",
+        "Strong intelligence-for-speed",
+        "Full multimodal",
+        "1M context"
+      ],
+      "weaknesses": [
+        "Controversial 3x price hike",
+        "High effective token cost",
+        "Perceived quality variance"
+      ],
+      "bestFor": [
+        "Fast agentic loops",
+        "Multimodal at speed",
+        "Real-time interactive apps"
+      ],
+      "avoidFor": [
+        "Cost-minimizing workloads (open-weight is far cheaper)"
+      ],
+      "proUsage": "The speed pick for agentic and multimodal loops where fast first/last token matters more than rock-bottom cost.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/google/gemini-3.5-flash",
+        "vendor": "https://blog.google/products/gemini/gemini-3-flash/",
+        "leaderboard": "https://artificialanalysis.ai/leaderboards/models"
+      },
+      "popularity": 3
+    },
+    {
+      "id": "gemini-3-1-flash-lite",
+      "name": "Gemini 3.1 Flash Lite",
+      "vendor": "Google",
+      "vendorKey": "gemini",
+      "openrouterId": "google/gemini-3.1-flash-lite",
+      "tier": "fast",
+      "status": "stable",
+      "oneLiner": "The cheapest current Gemini — a multimodal value tier with full 1M context.",
+      "price": {
+        "inputPerM": 0.25,
+        "outputPerM": 1.5,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": null,
+      "liveFields": [
+        "price",
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The budget Gemini — cheap multimodal access with a full 1M-token window.",
+        "loved": [
+          "Cheapest current Gemini at $0.25/$1.50 per M",
+          "Full 1M context",
+          "Multimodal"
+        ],
+        "gripes": [
+          "Lightest of the Gemini line on raw capability"
+        ]
+      },
+      "strengths": [
+        "Very cheap",
+        "1M context",
+        "Multimodal"
+      ],
+      "weaknesses": [
+        "Lowest Gemini capability tier"
+      ],
+      "bestFor": [
+        "Cheap long-context multimodal tasks",
+        "High-volume Gemini-ecosystem work"
+      ],
+      "avoidFor": [
+        "Hard reasoning or coding"
+      ],
+      "proUsage": "Cheap Gemini tier for high-volume multimodal or long-context jobs that don't need the flagship.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/google/gemini-3.1-flash-lite",
+        "vendor": "https://blog.google/products/gemini/gemini-3-flash/",
+        "leaderboard": null
+      },
+      "popularity": 16
+    },
+    {
+      "id": "grok-4-3",
+      "name": "Grok 4.3",
+      "vendor": "xAI",
+      "vendorKey": "grok",
+      "openrouterId": "x-ai/grok-4.3",
+      "tier": "frontier",
+      "status": "new",
+      "oneLiner": "xAI's fast, permissive cheap-output frontier model with native real-time X/web grounding.",
+      "price": {
+        "inputPerM": 1.25,
+        "outputPerM": 2.5,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": 205,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1446,
+        "aaIndex": 53,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "Fun, fast and permissive with real-time grounding, but practitioners say it 'still hasn't found a lane that makes economic sense' for coding.",
+        "loved": [
+          "Fastest model measured at 205 t/s",
+          "Most permissive guardrails of any frontier model",
+          "Native real-time X/web grounding",
+          "Big 47-pt generational jump; cheap output at $2.50/M"
+        ],
+        "gripes": [
+          "Trails Claude/GPT/Gemini for coding utility (treated as backup/for fun)",
+          "~$1.74/run for a worse result than cheaper Tier-A",
+          "Community felt 'betrayed' by Jan-2026 moderation tightening",
+          "$30/mo SuperGrok for full access"
+        ]
+      },
+      "strengths": [
+        "Top raw speed (205 t/s)",
+        "Real-time X/web grounding",
+        "Permissive guardrails",
+        "Cheap output"
+      ],
+      "weaknesses": [
+        "Weaker coding utility",
+        "Unclear economic niche",
+        "Moderation backlash"
+      ],
+      "bestFor": [
+        "Real-time/current-events queries",
+        "Permissive open-ended chat",
+        "Fast generation"
+      ],
+      "avoidFor": [
+        "Serious coding (use Claude/GPT)",
+        "Tasks needing tight guardrails"
+      ],
+      "proUsage": "Used mostly as a fast, real-time-grounded backup or for permissive open-ended generation, not primary coding.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/x-ai/grok-4.3",
+        "vendor": "https://docs.x.ai/developers/models",
+        "leaderboard": "https://artificialanalysis.ai/leaderboards/models"
+      },
+      "popularity": 18
+    },
+    {
+      "id": "grok-4-20",
+      "name": "Grok 4.20",
+      "vendor": "xAI",
+      "vendorKey": "grok",
+      "openrouterId": "x-ai/grok-4.20",
+      "tier": "frontier",
+      "status": "stable",
+      "oneLiner": "xAI's largest-context frontier model — a 2M-token window at cheap-output pricing.",
+      "price": {
+        "inputPerM": 1.25,
+        "outputPerM": 2.5,
+        "currency": "USD"
+      },
+      "context": 2000000,
+      "speedTps": null,
+      "liveFields": [
+        "price",
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1474,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "lmarenaElo",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "Notable mainly for the largest context of the frontier set (2M tokens); inherits the Grok 4.x coding-economics and moderation caveats.",
+        "loved": [
+          "2,000,000-token context — largest of the frontier set",
+          "Cheap output at $2.50/M",
+          "Real-time grounding pedigree"
+        ],
+        "gripes": [
+          "Same coding-utility and moderation caveats as the Grok 4.x line"
+        ]
+      },
+      "strengths": [
+        "Largest context window (2M)",
+        "Cheap output",
+        "Real-time grounding"
+      ],
+      "weaknesses": [
+        "Coding utility trails leaders",
+        "Grok-line moderation baggage"
+      ],
+      "bestFor": [
+        "Very long-context tasks",
+        "Whole-codebase or large-document ingestion"
+      ],
+      "avoidFor": [
+        "Top-tier coding quality"
+      ],
+      "proUsage": "Reached for when an unusually large 2M-token context window is the deciding factor.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/x-ai/grok-4.20",
+        "vendor": "https://docs.x.ai/developers/models",
+        "leaderboard": "https://lmarena.ai/leaderboard/text"
+      },
+      "popularity": 7
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "vendor": "DeepSeek",
+      "vendorKey": "deepseek",
+      "openrouterId": "deepseek/deepseek-v4-flash",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "The #1 model on OpenRouter by token throughput — the cheapest credible agentic brain with 1M context.",
+      "price": {
+        "inputPerM": 0.098,
+        "outputPerM": 0.197,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": null,
+      "liveFields": [
+        "price",
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The go-to budget brain for high-volume/agentic loops — unbeatable cost-to-capability, with the usual DeepSeek tooling lag and weaker hard-reasoning.",
+        "loved": [
+          "#1 model overall on OpenRouter (~19% of weekly volume)",
+          "Dirt-cheap at $0.10/$0.20 per M",
+          "MIT license, 1M context",
+          "Cheapest credible agentic option"
+        ],
+        "gripes": [
+          "Noticeably weaker on hardest reasoning",
+          "DeepSeek tooling/harness lag (protocol incompatibilities)",
+          "Flash much weaker than Pro on hard tasks"
+        ]
+      },
+      "strengths": [
+        "Lowest cost of any credible model",
+        "1M context",
+        "MIT license / self-hostable",
+        "Massive real-world adoption"
+      ],
+      "weaknesses": [
+        "Weak on hardest reasoning",
+        "Harness/tooling lag"
+      ],
+      "bestFor": [
+        "High-volume agentic loops",
+        "Cheap bulk generation",
+        "Self-hosting on a budget"
+      ],
+      "avoidFor": [
+        "Hardest reasoning tasks",
+        "Harnesses with poor DeepSeek support"
+      ],
+      "proUsage": "The default cheap workhorse — pros route high-volume agentic and bulk traffic here and escalate only the hard cases.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/deepseek/deepseek-v4-flash",
+        "vendor": "https://api-docs.deepseek.com/news/news260424",
+        "leaderboard": "https://openrouter.ai/rankings"
+      },
+      "popularity": 1
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "vendor": "DeepSeek",
+      "vendorKey": "deepseek",
+      "openrouterId": "deepseek/deepseek-v4-pro",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "DeepSeek's open-weight frontier value play — near-frontier intelligence at roughly 1/20th the closed-model price.",
+      "price": {
+        "inputPerM": 0.435,
+        "outputPerM": 0.87,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": 62,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": 52,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "Top-tier value — Intelligence Index 52 at ~$0.18/M blended, a top open-weight coding and agentic pick.",
+        "loved": [
+          "Index 52 at just ~$0.18/M blended — top-tier value",
+          "1.6T total / 49B active MoE, 1M context, 384K max output",
+          "#7 overall and #4 in programming on OpenRouter",
+          "MIT-direction open weights"
+        ],
+        "gripes": [
+          "Intelligence Index trails the closed frontier",
+          "DeepSeek tooling-lag caveat applies"
+        ]
+      },
+      "strengths": [
+        "Near-frontier intelligence per dollar",
+        "1M context, huge max output",
+        "Strong coding/agentic token volume"
+      ],
+      "weaknesses": [
+        "Below closed frontier on top-line intelligence",
+        "Harness/tooling lag"
+      ],
+      "bestFor": [
+        "Value-tier coding and agentic work",
+        "Self-hosted frontier-ish inference"
+      ],
+      "avoidFor": [
+        "Absolute hardest reasoning",
+        "Latency-critical interactive use"
+      ],
+      "proUsage": "The 'near-frontier for cheap' pick — pros use it when they want strong coding without paying closed-model rates.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/deepseek/deepseek-v4-pro",
+        "vendor": "https://www.morphllm.com/deepseek-v4",
+        "leaderboard": "https://artificialanalysis.ai/leaderboards/models"
+      },
+      "popularity": 6
+    },
+    {
+      "id": "tencent-hy3",
+      "name": "Tencent Hy3 Preview",
+      "vendor": "Tencent",
+      "vendorKey": "tencent",
+      "openrouterId": "tencent/hy3-preview",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "The cheapest of the top OpenRouter tier and #2 model overall by raw token volume.",
+      "price": {
+        "inputPerM": 0.063,
+        "outputPerM": 0.21,
+        "currency": "USD"
+      },
+      "context": 262144,
+      "speedTps": null,
+      "liveFields": [
+        "price",
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "A volume juggernaut — #2 model overall on OpenRouter and the cheapest of the top tier, riding raw price-throughput.",
+        "loved": [
+          "#2 model overall on OpenRouter by token throughput",
+          "Cheapest of the top tier at $0.063/$0.21 per M",
+          "256K context"
+        ],
+        "gripes": [
+          "Preview status",
+          "Smaller 256K context than the 1M-class open peers",
+          "Thin English-language practitioner coverage"
+        ]
+      },
+      "strengths": [
+        "Rock-bottom price",
+        "Huge real-world token volume",
+        "Fast/cheap throughput"
+      ],
+      "weaknesses": [
+        "256K context (smaller than peers)",
+        "Preview maturity",
+        "Limited Western coverage"
+      ],
+      "bestFor": [
+        "Ultra-cheap high-volume throughput",
+        "Cost-minimized agentic loops"
+      ],
+      "avoidFor": [
+        "Very long context (>256K)",
+        "Tasks needing proven reliability"
+      ],
+      "proUsage": "Used as one of the cheapest possible throughput engines for high-volume token loads.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/tencent/hy3-preview",
+        "vendor": null,
+        "leaderboard": "https://openrouter.ai/rankings"
+      },
+      "popularity": 26
+    },
+    {
+      "id": "xiaomi-mimo-v2-5",
+      "name": "Xiaomi MiMo-V2.5",
+      "vendor": "Xiaomi",
+      "vendorKey": "xiaomi",
+      "openrouterId": "xiaomi/mimo-v2.5",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "#1 in the OpenRouter Programming category — a cheap multimodal open model that owns coding-token volume.",
+      "price": {
+        "inputPerM": 0.14,
+        "outputPerM": 0.28,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": 43,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1466,
+        "aaIndex": 54,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The coding-volume champion among open models — #1 in OpenRouter's Programming category and excellent intelligence-per-dollar (Pro variant Index 54 at $0.18/M).",
+        "loved": [
+          "#1 in the OpenRouter Programming category",
+          "Multimodal (image+audio+video), 1M context",
+          "MiMo-V2.5-Pro hits Index 54 at $0.18/M — among the cheapest at that intelligence",
+          "Very cheap base at $0.14/$0.28 per M"
+        ],
+        "gripes": [
+          "Below closed frontier on absolute quality",
+          "LMArena WebDev rank (Pro #19) trails its raw volume lead"
+        ]
+      },
+      "strengths": [
+        "Best open coding-token throughput",
+        "Multimodal",
+        "1M context",
+        "Top value-per-dollar (Pro)"
+      ],
+      "weaknesses": [
+        "Not absolute top quality",
+        "Brand-new / thinner track record"
+      ],
+      "bestFor": [
+        "High-volume coding loops",
+        "Cheap multimodal tasks",
+        "Value-tier agentic coding"
+      ],
+      "avoidFor": [
+        "Hardest reasoning where closed frontier wins"
+      ],
+      "proUsage": "A favored cheap coding engine for high-volume programming workloads where closed-model cost can't be justified.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/xiaomi/mimo-v2.5",
+        "vendor": null,
+        "leaderboard": "https://openrouter.ai/rankings/programming"
+      },
+      "popularity": 20
+    },
+    {
+      "id": "minimax-m3",
+      "name": "MiniMax M3",
+      "vendor": "MiniMax",
+      "vendorKey": "minimax",
+      "openrouterId": "minimax/minimax-m3",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "The biggest open-weight release of the quarter — best intelligence-per-dollar, claiming frontier coding at ~5-10% of the cost.",
+      "price": {
+        "inputPerM": 0.3,
+        "outputPerM": 1.2,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": 45,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1450,
+        "aaIndex": 55,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "Huge value buzz — best intelligence-per-dollar on the AA leaderboard, already #3 overall and #2 in coding on OpenRouter; code-auditors stay a bit skeptical.",
+        "loved": [
+          "Best intelligence-per-dollar — Index 55 at $0.22/M blended",
+          "#3 overall and #2 in programming on OpenRouter within a week of launch",
+          "1M context, native multimodal",
+          "59.0% SWE-Bench Pro; claims edge over GPT-5.5/Gemini 3.1 Pro on coding"
+        ],
+        "gripes": [
+          "Some audits ding the code ('invents a batch signature that crashes')",
+          "Unproven vendor stability",
+          "Earlier MiniMax versions had restrictive licensing"
+        ]
+      },
+      "strengths": [
+        "Top intelligence-per-dollar",
+        "1M context, multimodal",
+        "Fast-rising coding adoption",
+        "LMArena WebDev #9 (1528)"
+      ],
+      "weaknesses": [
+        "Code-audit skepticism",
+        "New/unproven vendor",
+        "Licensing history questions"
+      ],
+      "bestFor": [
+        "Cost-sensitive coding and agentic work",
+        "Multimodal value tasks",
+        "Volume coding loops"
+      ],
+      "avoidFor": [
+        "When audited code-correctness guarantees matter most"
+      ],
+      "proUsage": "The buzzy value pick — pros run it for near-frontier coding at a fraction of closed-model cost, auditing output on critical paths.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/minimax/minimax-m3",
+        "vendor": "https://the-decoder.com/minimax-m3-open-weight-model-with-a-million-token-context-challenges-proprietary-leaders/",
+        "leaderboard": "https://artificialanalysis.ai/leaderboards/models"
+      },
+      "popularity": 12
+    },
+    {
+      "id": "kimi-k2-6",
+      "name": "Kimi K2.6",
+      "vendor": "Moonshot AI",
+      "vendorKey": "moonshot",
+      "openrouterId": "moonshotai/kimi-k2.6",
+      "tier": "open",
+      "status": "stable",
+      "oneLiner": "The open-weight darling — 'cheapest Tier-A, no caveats', uniquely stable over very long agentic sessions.",
+      "price": {
+        "inputPerM": 0.68,
+        "outputPerM": 3.41,
+        "currency": "USD"
+      },
+      "context": 262144,
+      "speedTps": 49,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1461,
+        "aaIndex": 54,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "very positive",
+        "score": 0.92,
+        "summary": "The most-loved open-weight model in practitioner threads — the only non-Western model rated Tier-A 'with no caveats', prized for marathon agentic stability.",
+        "loved": [
+          "Rated 'Tier-A with no caveats'; leading open-weights frontier (Index 54)",
+          "~3.6x cheaper than Opus",
+          "Best-in-class long-session stability (4,000+ tool calls over a 13-hour unbroken run)",
+          "Ties GPT-5.5 on SWE-Bench Pro (58.6%), leads HLE-with-tools (54.0%)",
+          "Modified MIT commercial license"
+        ],
+        "gripes": [
+          "Limited English docs",
+          "Smaller global community",
+          "Fragmented API providers",
+          "256K context vs 1M-class peers"
+        ]
+      },
+      "strengths": [
+        "Marathon agentic stability",
+        "Strong coding (SWE-Bench Pro)",
+        "Best-loved open-weight",
+        "Permissive license"
+      ],
+      "weaknesses": [
+        "Smaller 256K context",
+        "Sparse English docs / fragmented providers"
+      ],
+      "bestFor": [
+        "Very long agentic sessions / agent swarms",
+        "Open-weight production coding",
+        "Cost-sensitive Tier-A work"
+      ],
+      "avoidFor": [
+        "Tasks needing >256K context",
+        "Teams needing rich English tooling docs"
+      ],
+      "proUsage": "The open-weight pick for long-running agent swarms — pros lean on its 4,000+ tool-call stability for marathon coding runs.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/moonshotai/kimi-k2.6",
+        "vendor": "https://www.kimi.com/blog/kimi-k2-6",
+        "leaderboard": "https://lmarena.ai/leaderboard/code"
+      },
+      "popularity": 10
+    },
+    {
+      "id": "qwen3-7-max",
+      "name": "Qwen3.7 Max",
+      "vendor": "Alibaba",
+      "vendorKey": "qwen",
+      "openrouterId": "qwen/qwen3.7-max",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "China's top closed-weight flagship — an agent-first reasoning model matching GPT-5.5 medium at low latency.",
+      "price": {
+        "inputPerM": 1.25,
+        "outputPerM": 3.75,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": 108,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1474,
+        "aaIndex": 57,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "Strong mid-tier value and the top non-Anthropic WebDev coder, with trust/local-toolchain friction; flagship is API-only.",
+        "loved": [
+          "Index 57 matching GPT-5.5 medium, very low 2.6s latency, $1.43/M blended",
+          "#7 WebDev/Code on LMArena (1537) — top non-Anthropic",
+          "1M context, lowest hallucination among frontier (22.9%)",
+          "Claims 35h autonomous, 1000+ tool calls"
+        ],
+        "gripes": [
+          "Flagship is API-only (no chat UI)",
+          "Unconfirmed long-term pricing/vendor-trust questions",
+          "Local Qwen toolchain pain (llama.cpp bugs, missing tool-call parsers)"
+        ]
+      },
+      "strengths": [
+        "Top-tier intelligence at low latency",
+        "Best non-Anthropic WebDev coding",
+        "Long-horizon agent focus",
+        "Low hallucination"
+      ],
+      "weaknesses": [
+        "API-only flagship",
+        "Vendor-trust questions",
+        "Local toolchain friction"
+      ],
+      "bestFor": [
+        "Agent-first long-horizon coding",
+        "Low-latency reasoning",
+        "WebDev"
+      ],
+      "avoidFor": [
+        "Local self-hosting of the flagship",
+        "Trust-sensitive deployments"
+      ],
+      "proUsage": "Used as a strong, low-latency agentic coder — the top non-Claude WebDev option for pros who can use the API.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/qwen/qwen3.7-max",
+        "vendor": "https://www.marktechpost.com/2026/05/21/qwen-introduces-qwen3-7-max-a-reasoning-agent-model-with-a-1m-token-context-window/",
+        "leaderboard": "https://lmarena.ai/leaderboard/code"
+      },
+      "popularity": 8
+    },
+    {
+      "id": "glm-5-1",
+      "name": "GLM-5.1",
+      "vendor": "Z.ai",
+      "vendorKey": "zai",
+      "openrouterId": "z-ai/glm-5.1",
+      "tier": "open",
+      "status": "stable",
+      "oneLiner": "A strong-on-paper open coder that became the quarter's surprise regression in independent re-audits.",
+      "price": {
+        "inputPerM": 0.98,
+        "outputPerM": 3.08,
+        "currency": "USD"
+      },
+      "context": 202752,
+      "speedTps": 78,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1475,
+        "aaIndex": 51,
+        "aiderPolyglot": null,
+        "sweBench": 58.4
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "negative",
+        "score": 0.28,
+        "summary": "The surprise regression after a well-liked GLM-5 — strong benchmark numbers (LMArena WebDev #8) undercut by structural bugs found in practitioner re-audits.",
+        "loved": [
+          "MIT license; marketed for 8-hour autonomous coding runs",
+          "#8 WebDev/Code on LMArena (1532)",
+          "58.4% SWE-Bench Pro on paper",
+          "Strong AIME math"
+        ],
+        "gripes": [
+          "'Most painful fall from the re-audit' — dropped from Tier B to Tier C",
+          "Structural bugs ('invented fluent DSL plus history discard on every request')",
+          "200K context vs rivals' 1M",
+          "SWE-Bench Pro claims didn't hold up in independent tests"
+        ]
+      },
+      "strengths": [
+        "Strong benchmark/Arena scores",
+        "MIT license",
+        "Math"
+      ],
+      "weaknesses": [
+        "Structural code bugs in re-audits",
+        "200K context",
+        "Trust regression vs GLM-5"
+      ],
+      "bestFor": [
+        "Benchmark-style coding tasks",
+        "Math"
+      ],
+      "avoidFor": [
+        "Production coding without heavy review",
+        "Long-context work"
+      ],
+      "proUsage": "Approached with caution post-audit — pros who use it review output heavily rather than trust it on autonomous runs.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/z-ai/glm-5.1",
+        "vendor": "https://www.latent.space/p/ainews-zai-glm-5-new-sota-open-weights",
+        "leaderboard": "https://lmarena.ai/leaderboard/code"
+      },
+      "popularity": 11
+    },
+    {
+      "id": "llama-5",
+      "name": "Llama 5",
+      "vendor": "Meta",
+      "vendorKey": "llama",
+      "openrouterId": "meta-llama/llama-5",
+      "tier": "open",
+      "status": "stable",
+      "oneLiner": "Meta's frontier-class open-weights model targeting GPT-5/Gemini-3 parity on reasoning, coding and agents.",
+      "price": {
+        "inputPerM": 0.5,
+        "outputPerM": null,
+        "currency": "USD"
+      },
+      "context": null,
+      "speedTps": null,
+      "liveFields": [
+        "price"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "Keeps an open-weight option at the frontier, but practitioner buzz has shifted to Chinese labs — Llama is no longer the open-weight darling.",
+        "loved": [
+          "Frontier-class open weights targeting GPT-5/Gemini-3 parity",
+          "Hosted from ~$0.50/M input",
+          "Western open-weight option"
+        ],
+        "gripes": [
+          "Open-weight mindshare has decisively shifted to Kimi/MiniMax/DeepSeek",
+          "Llama Community License (700M MAU cap) is not fully permissive"
+        ]
+      },
+      "strengths": [
+        "Frontier-class open weights",
+        "Western lab provenance",
+        "Cheap hosting"
+      ],
+      "weaknesses": [
+        "Lost open-weight mindshare to Chinese labs",
+        "Non-fully-permissive license"
+      ],
+      "bestFor": [
+        "Western-governance open-weight deployments",
+        "Self-hosting at the frontier"
+      ],
+      "avoidFor": [
+        "Apps over the 700M MAU license cap",
+        "Teams chasing the cheapest/best open value (Chinese models lead)"
+      ],
+      "proUsage": "Chosen mainly when a Western-lab open-weight model is required for governance; otherwise pros pick Chinese open models.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/meta-llama/llama-5",
+        "vendor": "https://theplanettools.ai/tools/llama-5",
+        "leaderboard": null
+      },
+      "popularity": 22
+    },
+    {
+      "id": "mistral-large-3",
+      "name": "Mistral Large 3",
+      "vendor": "Mistral",
+      "vendorKey": "mistral",
+      "openrouterId": "mistralai/mistral-large-3",
+      "tier": "open",
+      "status": "stable",
+      "oneLiner": "Europe's leading open-weight frontier model — a 675B sparse MoE under Apache 2.0.",
+      "price": {
+        "inputPerM": null,
+        "outputPerM": null,
+        "currency": "USD"
+      },
+      "context": 256000,
+      "speedTps": null,
+      "liveFields": [
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "Europe's flagship open-weight MoE — the largest fully-permissive (Apache 2.0) model from a major Western lab, with vision.",
+        "loved": [
+          "675B total / 41B active sparse MoE",
+          "Apache 2.0 — fully permissive",
+          "256K context with vision",
+          "Largest open-weight MoE from a major Western lab"
+        ],
+        "gripes": [
+          "Predates the 2026 frontier wave (Dec 2025) and isn't topping current boards",
+          "256K context vs 1M-class peers"
+        ]
+      },
+      "strengths": [
+        "Fully permissive Apache 2.0",
+        "Large MoE with vision",
+        "European/sovereign option"
+      ],
+      "weaknesses": [
+        "Behind the 2026 frontier on capability",
+        "256K context"
+      ],
+      "bestFor": [
+        "Apache-2.0 / sovereign deployments",
+        "Self-hosted multimodal",
+        "European-governance needs"
+      ],
+      "avoidFor": [
+        "Bleeding-edge capability needs",
+        "Very long context"
+      ],
+      "proUsage": "The pick when a truly permissive (Apache 2.0) Western open-weight model is required for sovereign or commercial freedom.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/mistralai/mistral-large-3",
+        "vendor": "https://mistral.ai/news/mistral-3/",
+        "leaderboard": null
+      },
+      "popularity": 21
+    },
+    {
+      "id": "nemotron-3-ultra",
+      "name": "Nemotron 3 Ultra 550B",
+      "vendor": "NVIDIA",
+      "vendorKey": "nvidia",
+      "openrouterId": "nvidia/nemotron-3-ultra-550b-a55b",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "NVIDIA's top open Nemotron tier — a 550B MoE under a fully permissive license, powerful but hard to self-host.",
+      "price": {
+        "inputPerM": 0.5,
+        "outputPerM": 2.5,
+        "currency": "USD"
+      },
+      "context": null,
+      "speedTps": null,
+      "liveFields": [
+        "price"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "Powerful and permissively licensed, but practically inaccessible — needs ~8 B200 GPUs to self-host and trails MiniMax M3 on intelligence.",
+        "loved": [
+          "Most capable open model under a fully permissive license (OpenMDW-1.1)",
+          "550B params, 1M context, enterprise-grade",
+          "Free variant also available on OpenRouter"
+        ],
+        "gripes": [
+          "Needs ~8 B200 GPUs to self-host (huge capex barrier)",
+          "Intelligence Index trails MiniMax M3",
+          "Enterprise-only positioning limits adoption"
+        ]
+      },
+      "strengths": [
+        "Large permissively-licensed MoE",
+        "Enterprise-grade",
+        "Free OpenRouter variant"
+      ],
+      "weaknesses": [
+        "Massive self-hosting hardware barrier",
+        "Trails leading open models on intelligence",
+        "Enterprise-only fit"
+      ],
+      "bestFor": [
+        "Enterprise on-prem with B200 fleets",
+        "Permissive-license agentic sub-tasks"
+      ],
+      "avoidFor": [
+        "Small teams without big GPU fleets",
+        "When MiniMax/Kimi give better value"
+      ],
+      "proUsage": "Considered by enterprises with their own GPU fleets needing a permissively-licensed large open model on Bedrock/SageMaker.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b",
+        "vendor": "https://nvidianews.nvidia.com/news/nvidia-debuts-nemotron-3-family-of-open-models",
+        "leaderboard": null
+      },
+      "popularity": 23
+    },
+    {
+      "id": "muse-spark",
+      "name": "Muse Spark",
+      "vendor": "Meta",
+      "vendorKey": "meta",
+      "openrouterId": null,
+      "tier": "frontier",
+      "status": "new",
+      "oneLiner": "Meta Superintelligence Labs' first proprietary model — a strong multi-board debut and a strategic pivot from open source.",
+      "price": {
+        "inputPerM": null,
+        "outputPerM": null,
+        "currency": "USD"
+      },
+      "context": null,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": 1489,
+        "aaIndex": 52,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "lmarenaElo",
+      "sentiment": {
+        "label": "mixed",
+        "score": 0.5,
+        "summary": "A surprisingly strong proprietary debut (top-5 on LMArena Text and Vision on first appearance), but it marks Meta's controversial move away from open weights.",
+        "loved": [
+          "#5 Text (1489) and #5 Vision (1295) on LMArena — top-5 debut",
+          "First model from Meta Superintelligence Labs",
+          "Deep integration with Meta's user data"
+        ],
+        "gripes": [
+          "Fully proprietary / no open weights — a pivot from Meta's open-source identity",
+          "Pricing/availability not yet on OpenRouter or AA"
+        ]
+      },
+      "strengths": [
+        "Strong text and vision debut",
+        "Backed by Meta's data and scale"
+      ],
+      "weaknesses": [
+        "Closed/no open weights",
+        "Limited availability and undisclosed pricing",
+        "Unproven track record"
+      ],
+      "bestFor": [
+        "General reasoning and vision (where available)",
+        "Meta-ecosystem integration"
+      ],
+      "avoidFor": [
+        "Open-weight requirements",
+        "Production reliance before broader availability"
+      ],
+      "proUsage": "Mostly watched rather than deployed — strong benchmarks but limited external API access keeps it off most pro stacks for now.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": null,
+        "vendor": "https://venturebeat.com/technology/goodbye-llama-meta-launches-new-proprietary-ai-model-muse-spark-first-since",
+        "leaderboard": "https://lmarena.ai/leaderboard/text"
+      },
+      "popularity": 27
+    },
+    {
+      "id": "command-a-plus",
+      "name": "Command A+",
+      "vendor": "Cohere",
+      "vendorKey": "cohere",
+      "openrouterId": "cohere/command-a-plus",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "Cohere's sovereign/enterprise-focused open model — Apache 2.0, multimodal/agentic, with big agentic-benchmark gains.",
+      "price": {
+        "inputPerM": null,
+        "outputPerM": null,
+        "currency": "USD"
+      },
+      "context": 128000,
+      "speedTps": null,
+      "liveFields": [
+        "context"
+      ],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "A sovereign/enterprise-focused open model with strong agentic gains, efficient enough to run on ~2x H100.",
+        "loved": [
+          "218B sparse MoE (25B active), Apache 2.0",
+          "Multimodal/agentic, 48 languages, 128K context",
+          "Runs on ~2x H100",
+          "Big jumps on tau2-Bench Telecom (85%) and Terminal-Bench Hard (25%)"
+        ],
+        "gripes": [
+          "Not topping general leaderboards",
+          "Narrower enterprise/sovereign positioning",
+          "128K context vs 1M-class peers"
+        ]
+      },
+      "strengths": [
+        "Efficient (2x H100)",
+        "Apache 2.0",
+        "Multilingual (48 languages)",
+        "Enterprise/agentic tuning"
+      ],
+      "weaknesses": [
+        "Not a general-purpose leader",
+        "128K context",
+        "Niche positioning"
+      ],
+      "bestFor": [
+        "Sovereign/enterprise deployments",
+        "Multilingual agentic tasks",
+        "On-prem with modest GPUs"
+      ],
+      "avoidFor": [
+        "General consumer chat",
+        "Very long context"
+      ],
+      "proUsage": "Chosen by enterprises needing a permissive, multilingual, efficiently-hostable agentic model for sovereign deployments.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/cohere/command-a-plus",
+        "vendor": "https://cohere.com/blog/command-a-plus",
+        "leaderboard": null
+      },
+      "popularity": 24
+    }
+  ],
+  "upAndComing": [
+    {
+      "id": "minimax-m3",
+      "name": "MiniMax M3",
+      "vendor": "MiniMax",
+      "vendorKey": "minimax",
+      "openrouterId": "minimax/minimax-m3",
+      "expected": "Available now",
+      "why": "Best intelligence-per-dollar on the AA leaderboard; #3 overall and #2 in coding on OpenRouter within a week of launch.",
+      "link": "https://openrouter.ai/minimax/minimax-m3"
+    },
+    {
+      "id": "kimi-k2-6",
+      "name": "Kimi K2.6",
+      "vendor": "Moonshot AI",
+      "vendorKey": "moonshot",
+      "openrouterId": "moonshotai/kimi-k2.6",
+      "expected": "Available now",
+      "why": "The only non-Western model rated 'Tier-A with no caveats' — uniquely stable over 4,000+ tool calls / 13-hour agent runs.",
+      "link": "https://openrouter.ai/moonshotai/kimi-k2.6"
+    },
+    {
+      "id": "xiaomi-mimo-v2-5",
+      "name": "Xiaomi MiMo-V2.5",
+      "vendor": "Xiaomi",
+      "vendorKey": "xiaomi",
+      "openrouterId": "xiaomi/mimo-v2.5",
+      "expected": "Available now",
+      "why": "#1 in the OpenRouter Programming category — a cheap multimodal open model owning coding-token volume at top value-per-dollar.",
+      "link": "https://openrouter.ai/xiaomi/mimo-v2.5"
+    }
+  ],
+  "sources": [
+    {
+      "name": "OpenRouter models API (live, 340 models)",
+      "url": "https://openrouter.ai/api/v1/models"
+    },
+    {
+      "name": "OpenRouter rankings (overall + vendor market share)",
+      "url": "https://openrouter.ai/rankings"
+    },
+    {
+      "name": "OpenRouter rankings — Programming",
+      "url": "https://openrouter.ai/rankings/programming"
+    },
+    {
+      "name": "LMArena / Chatbot Arena — Text leaderboard",
+      "url": "https://lmarena.ai/leaderboard/text"
+    },
+    {
+      "name": "LMArena / Chatbot Arena — Code/WebDev leaderboard",
+      "url": "https://lmarena.ai/leaderboard/code"
+    },
+    {
+      "name": "LMArena / Chatbot Arena — Vision leaderboard",
+      "url": "https://arena.ai/leaderboard/vision"
+    },
+    {
+      "name": "LMArena changelog",
+      "url": "https://arena.ai/blog/leaderboard-changelog/"
+    },
+    {
+      "name": "Artificial Analysis — LLM leaderboard",
+      "url": "https://artificialanalysis.ai/leaderboards/models"
+    },
+    {
+      "name": "Artificial Analysis — GPQA-Diamond",
+      "url": "https://artificialanalysis.ai/evaluations/gpqa-diamond"
+    },
+    {
+      "name": "Artificial Analysis — Humanity's Last Exam",
+      "url": "https://artificialanalysis.ai/evaluations/humanitys-last-exam"
+    },
+    {
+      "name": "Aider polyglot leaderboard (official, last updated 2025-11-20)",
+      "url": "https://aider.chat/docs/leaderboards/"
+    },
+    {
+      "name": "SWE-bench (official leaderboards hub)",
+      "url": "https://www.swebench.com/"
+    },
+    {
+      "name": "Vals.ai — standardized SWE-bench Verified run",
+      "url": "https://www.vals.ai/benchmarks/swebench"
+    },
+    {
+      "name": "Terminal-Bench 2.0 (official)",
+      "url": "https://www.tbench.ai/leaderboard/terminal-bench/2.0"
+    },
+    {
+      "name": "Anthropic — Claude models overview",
+      "url": "https://platform.claude.com/docs/en/about-claude/models/overview"
+    },
+    {
+      "name": "OpenAI — Introducing GPT-5.5",
+      "url": "https://openai.com/index/introducing-gpt-5-5/"
+    },
+    {
+      "name": "TechCrunch — GPT-5.5 Instant becomes ChatGPT default",
+      "url": "https://techcrunch.com/2026/05/05/openai-releases-gpt-5-5-instant-a-new-default-model-for-chatgpt/"
+    },
+    {
+      "name": "Google — Gemini 3.5 models",
+      "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-5/"
+    },
+    {
+      "name": "Google — Gemini 3 Flash",
+      "url": "https://blog.google/products/gemini/gemini-3-flash/"
+    },
+    {
+      "name": "Google Cloud — Gemini 3.1 Pro docs",
+      "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-pro"
+    },
+    {
+      "name": "xAI — models docs",
+      "url": "https://docs.x.ai/developers/models"
+    },
+    {
+      "name": "DeepSeek — V4 launch news",
+      "url": "https://api-docs.deepseek.com/news/news260424"
+    },
+    {
+      "name": "Morph — DeepSeek V4 writeup",
+      "url": "https://www.morphllm.com/deepseek-v4"
+    },
+    {
+      "name": "MarkTechPost — Qwen3.7-Max",
+      "url": "https://www.marktechpost.com/2026/05/21/qwen-introduces-qwen3-7-max-a-reasoning-agent-model-with-a-1m-token-context-window/"
+    },
+    {
+      "name": "VentureBeat — Meta launches Muse Spark",
+      "url": "https://venturebeat.com/technology/goodbye-llama-meta-launches-new-proprietary-ai-model-muse-spark-first-since"
+    },
+    {
+      "name": "Llama 5 overview",
+      "url": "https://theplanettools.ai/tools/llama-5"
+    },
+    {
+      "name": "Mistral — Mistral 3 / Large 3",
+      "url": "https://mistral.ai/news/mistral-3/"
+    },
+    {
+      "name": "VentureBeat — MiniMax M3 debuts",
+      "url": "https://venturebeat.com/technology/minimax-m3-debuts-eclipsing-gpt-5-5-and-gemini-3-1-pro-on-key-benchmark-performance-for-just-5-10-of-the-cost"
+    },
+    {
+      "name": "The Decoder — MiniMax M3 open-weight",
+      "url": "https://the-decoder.com/minimax-m3-open-weight-model-with-a-million-token-context-challenges-proprietary-leaders/"
+    },
+    {
+      "name": "Moonshot — Kimi K2.6 blog",
+      "url": "https://www.kimi.com/blog/kimi-k2-6"
+    },
+    {
+      "name": "Latent Space — GLM-5 / GLM-5.1",
+      "url": "https://www.latent.space/p/ainews-zai-glm-5-new-sota-open-weights"
+    },
+    {
+      "name": "NVIDIA — Nemotron 3 family",
+      "url": "https://nvidianews.nvidia.com/news/nvidia-debuts-nemotron-3-family-of-open-models"
+    },
+    {
+      "name": "Cohere — Command A+",
+      "url": "https://cohere.com/blog/command-a-plus"
+    },
+    {
+      "name": "AWS — Amazon Nova 2 what's new",
+      "url": "https://docs.aws.amazon.com/nova/latest/nova2-userguide/whats-new.html"
+    },
+    {
+      "name": "The Decoder — Claude Opus 4.8 review",
+      "url": "https://the-decoder.com/anthropic-ships-claude-opus-4-8-as-a-modest-but-tangible-improvement-that-tops-gpt-5-5-in-most-benchmarks/"
+    },
+    {
+      "name": "Simon Willison — Gemini 3.5 Flash pricing",
+      "url": "https://simonwillison.net/2026/May/19/gemini-35-flash/"
+    },
+    {
+      "name": "Kilo — Kimi K2.6 vs GLM-5.1 vs Qwen vs MiniMax coding",
+      "url": "https://www.atlascloud.ai/blog/guides/kimi-k2-6-vs-glm-5-1-vs-qwen-3-6-plus-vs-minimax-m2-7-coding-2026"
+    },
+    {
+      "name": "BentoML — open-source LLM landscape",
+      "url": "https://www.bentoml.com/blog/navigating-the-world-of-open-source-large-language-models"
+    },
+    {
+      "name": "MLQ — Meta Mango/Avocado next-gen models",
+      "url": "https://mlq.ai/news/meta-readies-nextgeneration-mango-and-avocado-ai-models-for-2026-launch/"
+    },
+    {
+      "name": "nxcode — Grok 5 release news",
+      "url": "https://www.nxcode.io/resources/news/grok-5-release-date-latest-news-2026"
+    },
+    {
+      "name": "llm-stats — SWE-bench Verified",
+      "url": "https://llm-stats.com/benchmarks/swe-bench-verified"
+    },
+    {
+      "name": "Artificial Analysis — Gemini 3.5 Flash everything you need to know",
+      "url": "https://artificialanalysis.ai/articles/gemini-3-5-flash-everything-you-need-to-know"
+    }
+  ]
+}
