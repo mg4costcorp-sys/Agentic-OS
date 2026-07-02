@@ -142,7 +142,7 @@ function writeDream(dream: any): void {
 
 function runAgenticCli(bin: string, args: string[], label: string): number {
   console.log(`[run-dream] ${label}: launching ${bin}`);
-  const r = spawnSync(bin, args, { stdio: "inherit", timeout: 240_000 });
+  const r = spawnSync(bin, args, { stdio: "inherit", timeout: 480_000 });
   return r.status ?? 1;
 }
 
