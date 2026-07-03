@@ -304,8 +304,16 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
       const h = await fetch("http://localhost:8099/api/health").then((r) => r.json());
       setEngineUp(true); setEngineKeyed(!!h?.keyed);
       if (h?.keyed || openaiKey) return startCall();
-    } catch { setEngineUp(false); }
-    setVoiceSetupOpen(true);
+    } catch {
+      setEngineUp(false);
+      // Engine isn't up — but if we already have a saved key, silently re-spawn
+      // the voice engine with it instead of asking for the key every session.
+      if (openaiKey) {
+        const started = await startEngine(openaiKey).catch(() => null);
+        if (started?.ok) { setEngineUp(true); setEngineKeyed(true); return startCall(openaiKey); }
+      }
+    }
+    setVoiceSetupOpen(true);  // only prompt when there's genuinely no saved key
   }
   // ask the dev server to spawn voice-lab with the user's key — no terminal needed
   async function startEngine(key: string, base?: string) {

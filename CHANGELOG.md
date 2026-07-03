@@ -5,6 +5,153 @@ versions are kept as zipped artefacts locally for rollback.
 
 ---
 
+## V2.10.1 — 30 Jun 2026
+
+A polish + hardening pass on the V2.10 Hermes chat.
+
+### Fixed — the model picker respects your real setup
+
+- The composer model picker now only offers **providers you actually have
+  credentials for** (detected from `auth.json`, `~/.hermes/.env`, and your
+  config) — so a pick can't fail with "Unknown provider 'x'".
+- **OAuth / subscription providers now appear** with friendly labels — e.g.
+  "OpenAI · ChatGPT sub", "xAI · X sub" — so you can run GPT-5.5 / Grok on an
+  existing plan at zero marginal cost instead of paying through OpenRouter.
+
+### Improved — context-window meter
+
+- Accurate per-model window (GLM 5.1 = 203K, 5.2 = 1M, GPT-5.5 = 1.05M…). The
+  retro grid is now a **100-cell (4×25)** field that lights even at ~1%, with
+  filled cells **coloured by what's using the window** (amber = Hermes base,
+  yellow = your conversation). Added a plain "~X of Y tokens used" line and a
+  "Free space" label, and removed the confusing per-cell markers.
+
+### Changed — model catalog
+
+- Added **Claude Sonnet 5** (launched on OpenRouter 2026-06-30 · 1M context ·
+  $2/$10) to the picker.
+
+### Hardened — review pass (Codex + safety agents)
+
+- The **commands** strip's output sanitiser now redacts messaging/account IDs
+  and a wider set of token shapes (Bearer, JWT, `ghp_`, `AIza`, `xox*`…) on top
+  of the existing home-path + API-key masking — nothing sensitive lands on
+  screen or in a screen-recording.
+- `Update Hermes` confirms before running, and a timed-out update no longer
+  reports success; per-conversation model/provider overrides are validated
+  against argument injection; the "compact → fresh session" carry-over can no
+  longer leak into the wrong chat; haiku context size corrected; the
+  benign-warning filter was narrowed so it can't swallow a real reply line.
+
+---
+
+## V2.10 — 30 Jun 2026
+
+The **Hermes chat** release — the chat window now has a real model switcher, a
+live context-window meter, and one-click Hermes commands, all driven by your
+actual local Hermes.
+
+### New — Chat composer
+
+- **Model selector** — switch the model for a conversation from a searchable,
+  provider-grouped popover, and pick a saved **Mixture-of-Agents preset** as a
+  first-class "blend". Drives `hermes chat -m … --provider …` under the hood.
+- **Context-window meter** — a retro segmented gauge (in Hermes yellow) showing
+  how full the window is as a **%**, accurate per model (GLM 5.2 = 1M, GLM 5.1 =
+  203K, …). Click it for a `/context`-style breakdown — conversation · Hermes
+  base · free — with a notch at the 80% auto-compaction line. Counts are
+  client-side estimates (`~`).
+- **Commands menu** — runs REAL deterministic `hermes` sub-commands (no model
+  call, so nothing is hallucinated): **Insights** (token usage, cost & model
+  mix), **Status**, **Doctor**, **Version**, and **Update Hermes** (with a
+  confirm). Output is **redacted by default** before it's shown — home paths →
+  `~`, API-key/token fragments and messaging IDs masked, ANSI stripped — so it's
+  safe to screen-share. The endpoint runs a fixed allow-list only, loopback +
+  per-run-token gated.
+- **Compact** — "summarize & start fresh": distils the conversation into a brief
+  and carries it onto a new, near-empty session (the honest version of
+  compaction, since slash commands can't run through the one-shot chat path).
+- **Copy** button on each Hermes reply.
+
+### Changed
+
+- The chat header's **Intelligence** button is now **Voice**.
+- A live **"Hermes is thinking · Ns"** state fills the pre-token wait.
+- **Model catalog refreshed** against the live OpenRouter catalog — GLM 5.1 →
+  5.2, DeepSeek V4 → V4 Pro, fixed provider ids, added Fable 5 and the current
+  best model per vendor.
+
+### Fixed
+
+- Stripped Hermes' benign "Unknown toolsets: messaging" notice from replies and
+  removed the stale toolset entry from config.
+
+### Notes
+
+- Reviewed across three independent passes — shareability/secret scan, Codex
+  correctness, and a cross-cutting dead-code + build audit — before shipping.
+  Nine findings were fixed, including hardening the command sanitizer to
+  redact-by-default (masking a messaging ID and any non-`sk-` token shapes) and
+  reporting command timeouts as failures rather than partial success.
+- Streaming (token-by-token, like Hermes' Telegram mode) is in progress for the
+  next drop.
+
+---
+
+## V2.9 — 28 Jun 2026
+
+The **Ministry of Experts** release — build a Hermes Mixture-of-Agents line-up
+visually and write it straight to your config, no copy-paste. Plus the
+community voice-agent fixes and an OpenAI-key persistence fix for the voice chat.
+
+### New — Ministry of Experts (Mixture of Agents builder)
+
+- **A visual MoA builder**, the first persona in the Hermes Pantheon. Pick a
+  core (orchestrator / aggregator) model and up to three expert (reference)
+  models by drag-and-drop; the council renders each pick as a big branded node
+  with the orchestrator wired to its three experts.
+- **Live analytics per line-up** — Arena agent-leaderboard rank, indicative
+  cost (green→red), and speed, all read from the bundled model knowledge base.
+  No keys, no configuration.
+- **One-click "Save to this computer"** — writes the preset straight into
+  `~/.hermes/config.yaml` on **macOS and Windows** (`homedir`-based), **backs
+  the file up first** (timestamped) and **merges** so your other presets and
+  config keys are never touched. It also sets the preset as your default, and
+  the write is loopback-only + per-run-token gated. A copy-the-prompt fallback
+  is still there for anyone who'd rather hand it to Hermes by hand.
+- **Max-tokens slider** with a live quality-tradeoff explainer (smaller is
+  usually sharper for MoA; default 4096, recommended ceiling 16,384). Tells you
+  it can be changed any time.
+- Built against the Hermes v0.17.0 MoA schema — `provider` and `model` as
+  separate keys, provider-mixing supported (e.g. a subscription-backed core
+  with OpenRouter experts).
+
+### Fixed — Voice agent + key persistence (community reports)
+
+- **Voice-agent fixes** reported by the community (Gary Elliott, Seth
+  Goldberg) plus the "ALL toolset counts" selector bug; the model selectors
+  were refreshed.
+- **OpenAI key now persists** across conversations in the Hermes voice chat —
+  the saved key is silently reused to re-spawn the voice engine when it is
+  down, instead of re-prompting you every session.
+
+### Changed — Model intelligence
+
+- **GLM 5.1 → 5.2**, and the Ministry rankings use the **Arena agent
+  leaderboard** (the right board for agentic use). DeepSeek V4 Pro gains an
+  Arena rating so every default seat ranks consistently rather than showing one
+  unranked.
+
+### Notes
+
+- The Ministry feature and this release were cross-checked across three
+  independent review passes — a shareability / secret scan, a code-correctness
+  pass, and a cross-cutting dead-code + build audit — before shipping. ~1,200
+  lines of superseded builder code from earlier design iterations were removed;
+  type-check and production build are clean.
+
+---
+
 ## V2.8 — 20 Jun 2026
 
 The **Cross-platform** release — one zip, runs on macOS and Windows. Plus a

@@ -1015,7 +1015,7 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
   const [expandedKpi, setExpandedKpi] = useState<"spend" | "skills" | null>(null);
   const [dreamIdx, setDreamIdx] = useState(0);
   const [spendView, setSpendView] = useState<"subscription" | "tokens">("subscription");
-  const { rate, minutesFor, setMinutesFor } = useTimeSaved();
+  const { rate, minutesFor, setMinutesFor, setRate } = useTimeSaved();
 
   // Skill totals from demo skills (per-period scaling: assumes "uses" is week)
   const periodFactor = period === "day" ? 1 / 7 : period === "week" ? 1 : 30 / 7;
@@ -1215,14 +1215,16 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
                 </svg>
               }
             />
-            {/* 2. Skills saved (middle) — time saved, dollar figure hidden per user preference */}
+            {/* 2. Skills saved (middle) — $0 until configured */}
             <KpiPanel
               eyebrow="Skills saved"
-              icon={Clock}
-              value={skillsConfigured ? formatHours(savedPeriod.minutes) : "—"}
+              icon={DollarSign}
+              value={
+                skillsConfigured ? `$${Math.round(savedPeriod.dollars).toLocaleString()}` : "$0"
+              }
               sub={
                 skillsConfigured
-                  ? `${configuredCount} skills configured`
+                  ? `${formatHours(savedPeriod.minutes)} saved · ${configuredCount} skills configured`
                   : `${demoSkills.length} skills detected · click to configure`
               }
               tone="emerald"
@@ -1341,6 +1343,8 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
           {expandedKpi === "skills" && (
             <SkillsSavedExpansion
               onClose={() => setExpandedKpi(null)}
+              rate={rate}
+              setRate={setRate}
               skills={demoSkills}
               minutesFor={minutesFor}
               setMinutesFor={setMinutesFor}
@@ -3285,12 +3289,16 @@ function MiniTotal({ label, value, accent }: { label: string; value: string; acc
 
 function SkillsSavedExpansion({
   onClose,
+  rate,
+  setRate,
   skills,
   minutesFor,
   setMinutesFor,
   period,
 }: {
   onClose: () => void;
+  rate: number;
+  setRate: (n: number) => void;
   skills: DemoSkill[];
   minutesFor: (name: string) => number;
   setMinutesFor: (name: string, value: number) => void;
@@ -3316,7 +3324,7 @@ function SkillsSavedExpansion({
     >
       <div className="flex items-center justify-between px-5 py-3 border-b border-border/60">
         <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-emerald-300" />
+          <DollarSign className="h-4 w-4 text-emerald-300" />
           <div className="text-[12px] font-semibold">Skills saved · tune your estimates</div>
         </div>
         <div className="flex items-center gap-3">
@@ -3368,6 +3376,28 @@ function SkillsSavedExpansion({
         </div>
       )}
 
+      {/* Hourly rate */}
+      <div className="px-5 py-4 border-b border-border/60 flex flex-wrap items-center gap-4">
+        <div className="flex-1 min-w-[260px]">
+          <div className="text-[11px] font-semibold mb-0.5">Your hourly rate</div>
+          <div className="text-[10px] text-muted-foreground">
+            What an hour of your time is worth. Used to convert minutes saved into dollars across
+            every skill.
+          </div>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+          <span className="text-[11px] text-muted-foreground">$</span>
+          <input
+            type="number"
+            min={0}
+            value={rate}
+            onChange={(e) => setRate(Number(e.target.value) || 0)}
+            className="w-20 bg-transparent outline-none text-[14px] font-semibold tabular-nums"
+          />
+          <span className="text-[10px] text-muted-foreground">/ hour</span>
+        </div>
+      </div>
+
       {/* Empty state when no skills are configured */}
       {configuredCount === 0 && skills.length > 0 && (
         <div className="px-5 py-6 border-b border-border/60">
@@ -3380,8 +3410,8 @@ function SkillsSavedExpansion({
               automatically, or enter them manually below.
             </div>
             <div className="text-[10px] text-muted-foreground">
-              {skills.length} skill{skills.length !== 1 ? "s" : ""} detected · no estimates
-              configured yet
+              {skills.length} skill{skills.length !== 1 ? "s" : ""} detected · all showing $0 until
+              configured
             </div>
           </div>
         </div>
@@ -3395,12 +3425,14 @@ function SkillsSavedExpansion({
               <th className="text-left font-medium px-4 py-2">Skill</th>
               <th className="text-right font-medium px-4 py-2">Uses</th>
               <th className="text-left font-medium px-4 py-2">Time saved per run</th>
+              <th className="text-right font-medium px-4 py-2">$ saved</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/60">
             {sorted.map((s) => {
               const min = minutesFor(s.name) || s.minsPerRun;
               const uses = s.uses * factor;
+              const dollars = ((min * uses) / 60) * rate;
               const unit = getUnit(s.name);
               const displayValue = unit === "hr" ? +(min / 60).toFixed(2) : min;
               return (
@@ -3445,6 +3477,12 @@ function SkillsSavedExpansion({
                         {unit}
                       </button>
                     </div>
+                  </td>
+                  <td
+                    className="px-4 py-2 text-right tabular-nums font-semibold"
+                    style={{ color: "#3ddc97" }}
+                  >
+                    ${Math.round(dollars).toLocaleString()}
                   </td>
                 </tr>
               );
@@ -3760,13 +3798,15 @@ function DreamCarousel({
 
         {/* Body */}
         <div className="relative p-5 md:p-7 flex flex-col md:min-h-0 md:overflow-hidden">
-          {/* Top-right meta cluster — vertical: time saved + last refreshed (dollar impact hidden per user preference) */}
+          {/* Top-right meta cluster — vertical: time saved + dollar impact + last refreshed */}
           <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5">
             <div
               className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/10 text-[10px] tabular-nums text-emerald-100"
               style={{ boxShadow: "0 4px 16px -8px rgba(16,185,129,0.45)" }}
               title="Estimated impact if you act on this"
             >
+              <span className="font-semibold tracking-tight">${cur.dollarImpact}/mo</span>
+              <span className="opacity-60">·</span>
               <span className="opacity-90">{cur.timeImpactMins} min saved</span>
             </div>
             <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider text-violet-200/60">

@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "claude-os",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "dev", "--port", "8081"],
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev"],
       "port": 8081
     },
     {

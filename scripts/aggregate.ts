@@ -871,18 +871,6 @@ function parseFrontmatter(content: string): { fm: MemoryFrontmatter; body: strin
       (fm as any)[key] = val;
     }
   }
-  // The line scanner above only sees unindented `key: value` pairs, so a
-  // nested `metadata:\n  type: user` block (our memory schema) is skipped.
-  // Pull `type` out of it directly if the flat scan didn't already find one.
-  if (!fm.type) {
-    const metaBlock = m[1].match(/^metadata:[ \t]*\n((?:[ \t]+.+\n?)*)/m);
-    if (metaBlock) {
-      const typeLine = metaBlock[1].match(/^[ \t]+type:\s*(.+)$/m);
-      if (typeLine) {
-        fm.type = typeLine[1].trim().replace(/^["']|["']$/g, "");
-      }
-    }
-  }
   return { fm, body: m[2] };
 }
 

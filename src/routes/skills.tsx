@@ -12,6 +12,7 @@ import {
   Cog,
   BarChart3,
   Clock,
+  DollarSign,
   RotateCcw,
 } from "lucide-react";
 import skillsHero from "@/assets/skills/skills-hero.png";
@@ -117,7 +118,7 @@ function SkillsPage() {
   const totalUses = skills.reduce((a, s) => a + s.uses, 0);
 
   const [period, setPeriod] = useState<Period>("week");
-  const { minutesFor, setMinutesFor, rate, resetAll } = useTimeSaved();
+  const { minutesFor, setMinutesFor, rate, setRate, resetAll } = useTimeSaved();
   const t = liveTotals(minutesFor, rate, period);
 
   const byCategory = useMemo(
@@ -221,9 +222,13 @@ function SkillsPage() {
                   <div className="text-5xl font-semibold tabular-nums tracking-tight">
                     {formatHours(t.minutes)}
                   </div>
+                  <div className="text-2xl font-semibold tabular-nums" style={{ color: ACCENT }}>
+                    ${Math.round(t.dollars).toLocaleString()}
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2 max-w-md">
-                  Estimated human hours that Claude removed this {period}.
+                  Estimated human hours that Claude removed this {period} — converted at your hourly
+                  rate.
                 </p>
               </div>
 
@@ -244,6 +249,18 @@ function SkillsPage() {
                   ))}
                 </div>
                 <div className="flex items-center gap-2 rounded-full border border-border bg-background pl-3 pr-1 py-1">
+                  <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+                  <input
+                    type="number"
+                    min={0}
+                    value={rate}
+                    onChange={(e) => setRate(Number(e.target.value))}
+                    className="w-16 bg-transparent text-sm font-semibold tabular-nums outline-none"
+                    aria-label="Hourly rate"
+                  />
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground pr-2">
+                    / hour
+                  </span>
                   <button
                     onClick={resetAll}
                     title="Reset all overrides"
@@ -283,7 +300,7 @@ function SkillsPage() {
                       />
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-1 tabular-nums">
-                      {s.category}
+                      ${Math.round(s.dollars).toLocaleString()} · {s.category}
                     </div>
                   </div>
                 );

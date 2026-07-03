@@ -157,7 +157,8 @@
         "lmarenaElo": 1479,
         "aaIndex": 61,
         "aiderPolyglot": null,
-        "sweBench": 88.6
+        "sweBench": 88.6,
+        "arenaAgent": 8.89
       },
       "primaryBench": "aaIndex",
       "sentiment": {
@@ -234,7 +235,8 @@
         "lmarenaElo": 1493,
         "aaIndex": 57,
         "aiderPolyglot": null,
-        "sweBench": 82
+        "sweBench": 82,
+        "arenaAgent": 7.98
       },
       "primaryBench": "aaIndex",
       "sentiment": {
@@ -306,7 +308,8 @@
         "lmarenaElo": 1470,
         "aaIndex": 52,
         "aiderPolyglot": null,
-        "sweBench": 79.6
+        "sweBench": 79.6,
+        "arenaAgent": 3.05
       },
       "primaryBench": "aaIndex",
       "sentiment": {
@@ -449,7 +452,8 @@
         "lmarenaElo": 1474,
         "aaIndex": 60,
         "aiderPolyglot": null,
-        "sweBench": 82.6
+        "sweBench": 82.6,
+        "arenaAgent": 8.04
       },
       "primaryBench": "aaIndex",
       "sentiment": {
@@ -1225,7 +1229,7 @@
         "speedTps"
       ],
       "benchmarks": {
-        "lmarenaElo": null,
+        "lmarenaElo": 1470,
         "aaIndex": 52,
         "aiderPolyglot": null,
         "sweBench": null
@@ -1643,14 +1647,14 @@
       "popularity": 8
     },
     {
-      "id": "glm-5-1",
-      "name": "GLM-5.1",
+      "id": "glm-5-2",
+      "name": "GLM-5.2",
       "vendor": "Z.ai",
       "vendorKey": "zai",
-      "openrouterId": "z-ai/glm-5.1",
+      "openrouterId": "z-ai/glm-5.2",
       "tier": "open",
       "status": "stable",
-      "oneLiner": "A strong-on-paper open coder that became the quarter's surprise regression in independent re-audits.",
+      "oneLiner": "Z.ai's open-weight coder; GLM-5.2 is the current 1M-context refresh, live on OpenRouter.",
       "price": {
         "inputPerM": 0.98,
         "outputPerM": 3.08,
@@ -1667,7 +1671,8 @@
         "lmarenaElo": 1475,
         "aaIndex": 51,
         "aiderPolyglot": null,
-        "sweBench": 58.4
+        "sweBench": 58.4,
+        "arenaAgent": 4.4
       },
       "primaryBench": "aaIndex",
       "sentiment": {
@@ -1710,7 +1715,7 @@
         "inPlay": true
       },
       "links": {
-        "openrouter": "https://openrouter.ai/z-ai/glm-5.1",
+        "openrouter": "https://openrouter.ai/z-ai/glm-5.2",
         "vendor": "https://www.latent.space/p/ainews-zai-glm-5-new-sota-open-weights",
         "leaderboard": "https://lmarena.ai/leaderboard/code"
       },
