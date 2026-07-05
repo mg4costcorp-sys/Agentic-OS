@@ -540,5 +540,29 @@ button.focus-orange:focus {
 .kg-node-2 { animation: kg-twinkle 5.0s ease-in-out infinite 1.2s; }
 
 @media (prefers-reduced-motion: reduce) {
-  .kg-statue-zoom, .kg-constellation, .kg-node-0, .kg-node-1, .kg-node-2 { animation: none; }
+  .kg-statue-zoom, .kg-constellation, .kg-node-0, .kg-node-1, .kg-node-2, .ministry-aurora, .ministry-connector { animation: none; }
+}
+
+/* Ministry of Experts — a slow gold aurora drifting behind the council chart. */
+@keyframes ministry-aurora {
+  0%   { transform: translate(-6%, -5%) scale(1);   opacity: 0.55; }
+  50%  { transform: translate(6%, 5%) scale(1.18);  opacity: 0.85; }
+  100% { transform: translate(-6%, -5%) scale(1);   opacity: 0.55; }
+}
+.ministry-aurora {
+  background:
+    radial-gradient(42% 52% at 32% 34%, rgba(255,210,30,0.20), transparent 70%),
+    radial-gradient(38% 46% at 70% 64%, rgba(255,170,40,0.13), transparent 72%);
+  filter: blur(16px);
+  animation: ministry-aurora 9s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Flowing energy along the council connectors (experts → core). */
+@keyframes ministry-flow {
+  to { stroke-dashoffset: -16; }
+}
+.ministry-connector {
+  stroke-dasharray: 3 5;
+  animation: ministry-flow 0.85s linear infinite;
 }

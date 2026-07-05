@@ -1,12 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
-  Activity,
-  Cpu,
-  Server,
-  Shield,
+  Crown,
   ArrowUpRight,
   CheckCircle2,
   Loader2,
@@ -25,8 +22,33 @@ import {
   Users,
   ArrowUp,
   Waypoints,
+  ChevronDown,
+  Check,
+  Copy,
+  Terminal,
+  Mic,
 } from "lucide-react";
 import { IntelligencePortal, type ActivityEvent, type AppKey } from "@/components/intelligence-portal";
+import modelIntel from "@/data/model-intel.json";
+import { ModelLogo } from "@/components/model-logos";
+// Ministry of Experts — hero art (Nous/Hermes, from their site) + bundled
+// lobehub static-SVG vendor logos (offline-safe, every model vendor covered).
+import ministryHero from "@/assets/ministry-hero.webp";
+import logoVendorClaude from "@/assets/logo-claude.svg";
+import logoVendorOpenAI from "@/assets/logo-openai.svg";
+import logoVendorGemini from "@/assets/logo-gemini.svg";
+import logoVendorGrok from "@/assets/logo-grok.svg";
+import logoVendorDeepseek from "@/assets/logo-deepseek.svg";
+import logoVendorMinimax from "@/assets/logo-minimax.svg";
+import logoVendorZai from "@/assets/logo-zai.svg";
+import logoVendorQwen from "@/assets/logo-qwen.svg";
+import logoVendorMoonshot from "@/assets/logo-moonshot.svg";
+import logoVendorTencent from "@/assets/logo-tencent.svg";
+import logoVendorXiaomi from "@/assets/logo-xiaomi.svg";
+import logoVendorNvidia from "@/assets/logo-nvidia.svg";
+import logoVendorMistral from "@/assets/logo-mistral.svg";
+import logoVendorMeta from "@/assets/logo-meta.svg";
+import logoVendorCohere from "@/assets/logo-cohere.svg";
 import confetti from "canvas-confetti";
 import hermesLogo from "@/assets/hermes-agent.png";
 import hermesPortrait from "@/assets/hermes-portrait.png";
@@ -701,15 +723,13 @@ interface ModelCatalogEntry {
 
 function useHermesModels() {
   const demo = useDemoMode();
-  return useQuery<{
-    default: { provider: string; name: string } | null;
-    catalog: ModelCatalogEntry[];
-  }>({
+  return useQuery<HermesModelsData>({
     queryKey: ["hermes-models", demo],
     queryFn: async () => {
       if (demo) {
         return {
-          default: { provider: "openai-codex", name: "gpt-5.5" },
+          default: { provider: "openai-codex", name: "gpt-5.5", context: 400_000 },
+          mixtures: [{ name: "ministry", references: 3, aggregator: "claude-opus-4.8" }],
           catalog: [
             { provider: "anthropic", models: [
               { name: "claude-opus-4.8", tier: "top" as const },
@@ -2112,6 +2132,729 @@ interface ChatMessage {
   role: "user" | "hermes";
   content: string;
   timestamp: number;
+  // Render the content verbatim in a monospace <pre> (used for deterministic
+  // command output like `hermes insights`, which is box-drawn + column-aligned).
+  pre?: boolean;
+}
+
+// ── Composer model selector + context-window meter ──────────────────────────
+// The chat composer carries (a) a model chip to switch the model for THIS
+// conversation — any configured model, or a saved Mixture-of-Agents preset —
+// and (b) a context meter estimating how full the conversation is against the
+// model's window, with a marker at Hermes' real 80% auto-compaction line.
+// Token counts are client-side estimates (chars ÷ ~4, nudged up for code), so
+// they're shown with a "~"; `hermes chat -Q` doesn't surface exact usage.
+type ChatModelPick = {
+  provider: string;
+  name: string;
+  context?: number;
+  mixture?: boolean;
+  references?: number;
+};
+type HermesModelsData = {
+  default: { provider: string; name: string; context?: number } | null;
+  catalog: ModelCatalogEntry[];
+  mixtures?: Array<{ name: string; references: number; aggregator?: string }>;
+  // Providers the user actually has credentials for; the picker hides the rest
+  // so a model pick can't fail with "Unknown provider". Empty → show all.
+  configured?: string[];
+};
+
+const CTX_NUM_FMT = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+function fmtTokens(n: number): string {
+  return CTX_NUM_FMT.format(Math.max(0, Math.round(n)));
+}
+
+// chars ÷ 4 for prose, ÷ 3.5 when the text looks code/JSON-dense (those
+// tokenize hotter). + ~4 tokens/message for the role wrapper, + 3 once for the
+// reply priming — the documented OpenAI chat-format overhead. An estimate
+// across providers, never exact.
+function estChatTokens(messages: ChatMessage[], draft: string): number {
+  const one = (t: string) => {
+    if (!t) return 0;
+    const codeish = /[{}();=<>[\]]|```/.test(t);
+    return Math.ceil(t.length / (codeish ? 3.5 : 4));
+  };
+  let total = 3;
+  for (const m of messages) total += one(m.content) + 4;
+  if (draft.trim()) total += one(draft) + 4;
+  return total;
+}
+
+// Context window for the active model. The configured default carries its real
+// context_length from config.yaml; otherwise fall back to family heuristics
+// (2026 windows). Always treated as an estimate in the UI.
+// Per-model context windows, verified against the live OpenRouter catalog
+// (2026-06). Order matters — first match wins, so put specific ids before
+// family fallbacks (e.g. glm-5.2 = 1M but glm-5.1/4.x = ~203K).
+const CTX_TABLE: Array<[RegExp, number]> = [
+  [/glm-5\.2/, 1_048_576],
+  [/glm-(5\.1|5v|5-turbo|5\b|4\.7|4\.6|4\.5)/, 202_752],
+  [/haiku/, 200_000],
+  [/fable|opus|sonnet|claude/, 1_000_000],
+  [/gpt-5\.5|gpt-chat/, 1_050_000],
+  [/gpt-5|gpt-4\.1|o[34]\b/, 400_000],
+  [/gemini/, 1_048_576],
+  [/grok-4\.20/, 2_000_000],
+  [/grok-4/, 1_000_000],
+  [/deepseek-v4/, 1_048_576],
+  [/deepseek/, 131_072],
+  [/minimax-m3/, 1_048_576],
+  [/minimax/, 204_800],
+  [/qwen3\.7|qwen3\.5|qwen3-max/, 1_000_000],
+  [/kimi|moonshot/, 262_144],
+  [/llama-4/, 1_048_576],
+  [/llama-3|llama3/, 131_072],
+  [/nemotron/, 1_000_000],
+  [/mistral|command|devstral/, 262_144],
+  [/fugu|sakana/, 1_000_000],
+];
+function modelCtxLimit(pick: ChatModelPick | null): number {
+  if (pick?.context && pick.context > 0) return pick.context;
+  const n = (pick?.name ?? "").toLowerCase();
+  if (!n) return 200_000;
+  for (const [re, ctx] of CTX_TABLE) if (re.test(n)) return ctx;
+  return 200_000;
+}
+
+// Hermes occasionally prints benign stderr-style notices to stdout (e.g.
+// "Warning: Unknown toolsets: messaging" from a stale toolset entry in
+// config.yaml). Strip those leading diagnostic lines so the chat bubble shows
+// the answer, not the noise.
+function cleanHermesReply(text: string): string {
+  // Only strip Hermes' own benign startup diagnostics (e.g. "Warning: Unknown
+  // toolsets: messaging") — never a legitimate reply line that starts "Warning:".
+  return text
+    .split("\n")
+    .filter((l) => !/^\s*Warning:\s*(Unknown toolset|Unrecognized|Deprecat|No config)/i.test(l))
+    .join("\n");
+}
+
+const PROVIDER_TINT: Record<string, string> = {
+  anthropic: "#D4A27F",
+  openai: "#74AA9C",
+  "openai-codex": "#74AA9C",
+  googlegemini: "#4285F4",
+  google: "#4285F4",
+  openrouter: "#A78BFA",
+  xai: "#E5E7EB",
+  "xai-oauth": "#E5E7EB",
+  mistral: "#FA520F",
+  ollama: "#FFE6CB",
+  groq: "#F55036",
+  cohere: "#39594D",
+  sakana: "#FF6B9D",
+  minimax: "#FF6B6B",
+  moa: "#FFD21E",
+  custom: "#94A3B8",
+};
+function providerTint(p: string): string {
+  return PROVIDER_TINT[(p || "").toLowerCase()] ?? "rgba(255,230,203,0.6)";
+}
+// Friendly group-header labels — esp. for OAuth/subscription providers whose
+// raw ids ("openai-codex", "xai-oauth") read like jargon.
+const PROVIDER_LABEL: Record<string, string> = {
+  "openai-codex": "OpenAI · ChatGPT sub",
+  "xai-oauth": "xAI · X sub",
+  openrouter: "OpenRouter",
+  googlegemini: "Google",
+  sakana: "Sakana · Fugu",
+  minimax: "MiniMax",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  xai: "xAI",
+  mistral: "Mistral",
+  ollama: "Ollama · local",
+  groq: "Groq",
+  cohere: "Cohere",
+};
+function providerLabel(p: string): string {
+  return PROVIDER_LABEL[(p || "").toLowerCase()] ?? p;
+}
+function shortModelName(name: string): string {
+  return name.includes("/") ? name.split("/").pop()! : name;
+}
+
+// Interactive context-window meter: a 4px bar (tick at the 80% auto-compaction
+// line, color-shifting calm→amber→red) that opens a breakdown popover on click —
+// big %, used/limit/free, the model's window, and the compaction note.
+function ContextMeter({
+  used,
+  limit,
+  modelLabel,
+}: {
+  used: number;
+  limit: number;
+  modelLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  // Hermes' own system prompt + core tools + SOUL/memory also live in the
+  // window; the dashboard can't read those exactly, so we add a small flat
+  // estimate so the breakdown isn't just "messages". Everything here is an
+  // estimate (~).
+  const HERMES_BASE = 6000;
+  const conversation = Math.max(0, used);
+  const usedTotal = conversation + HERMES_BASE;
+  const pct = limit > 0 ? Math.min(100, (usedTotal / limit) * 100) : 0;
+  const free = Math.max(0, limit - usedTotal);
+  const COMPACT = 80;
+  // Hermes yellow while there's room, then warm → hot as it fills.
+  const color = pct >= 95 ? "#FF6B6B" : pct >= 80 ? "#F5A623" : "#FFD21E";
+  // Retro segmented bar (resting) + square grid (popover).
+  // Never let "a little used" round down to an empty bar/grid — show ≥1 cell.
+  const SEGS = 14;
+  const segFill = pct > 0 ? Math.max(1, Math.round((pct / 100) * SEGS)) : 0;
+  const GRID = 100; // 4 rows × 25 — fine-grained so even ~1% lights a dot
+  // Colour the filled cells by what's using the window — amber base + yellow
+  // conversation — like /context's segmented breakdown.
+  const baseDots = usedTotal > 0 ? Math.max(1, Math.round((HERMES_BASE / limit) * GRID)) : 0;
+  const convDots = Math.round((conversation / limit) * GRID);
+  const rows: Array<[string, number, string]> = [
+    ["Conversation", conversation, "#FFD21E"],
+    ["Hermes base · sys, tools, memory (est.)", HERMES_BASE, "#F5A623"],
+    ["Free space", free, "rgba(255,230,203,0.28)"],
+  ];
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-2 group"
+        title={`Context window · ~${fmtTokens(usedTotal)} of ${fmtTokens(limit)} used (${Math.round(
+          pct,
+        )}%) · click for the breakdown`}
+        style={{
+          borderRadius: 8,
+          border: "1px solid rgba(255,230,203,0.2)",
+          background: "rgba(0,0,0,0.35)",
+          padding: "4px 8px",
+        }}
+      >
+        <span className="flex items-center" style={{ gap: 2 }}>
+          {Array.from({ length: SEGS }).map((_, i) => (
+            <span
+              key={i}
+              style={{
+                width: 4,
+                height: 11,
+                background: i < segFill ? color : "rgba(255,230,203,0.13)",
+                boxShadow: i < segFill ? `0 0 4px ${color}aa` : "none",
+                transition: "background .3s ease",
+              }}
+            />
+          ))}
+        </span>
+        <span
+          className="hermes-mono"
+          style={{ fontSize: 11, color, fontVariantNumeric: "tabular-nums" }}
+        >
+          {Math.round(pct)}%
+        </span>
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full mb-2 right-0 z-50"
+          style={{
+            width: 268,
+            background: "#0C2A28",
+            border: "1px solid rgba(255,230,203,0.18)",
+            borderRadius: 12,
+            boxShadow: "0 18px 50px rgba(0,0,0,0.6)",
+            padding: 14,
+          }}
+        >
+          <div className="flex items-baseline justify-between" style={{ marginBottom: 10 }}>
+            <span
+              className="hermes-mono"
+              style={{
+                fontSize: 9,
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+                color: "rgba(255,230,203,0.5)",
+              }}
+            >
+              Context window
+            </span>
+            <span
+              className="hermes-mono"
+              style={{ fontSize: 22, color, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}
+            >
+              {Math.round(pct)}%
+            </span>
+          </div>
+          <div
+            className="hermes-mono"
+            style={{
+              fontSize: 10,
+              color: "rgba(255,230,203,0.6)",
+              marginBottom: 10,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            ~{fmtTokens(usedTotal)} of {fmtTokens(limit)} tokens used
+          </div>
+          {/* retro dot grid — 100 cells (4 rows × 25), fills as the window does */}
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: "repeat(25, 1fr)", gap: 2, marginBottom: 12 }}
+          >
+            {Array.from({ length: GRID }).map((_, i) => {
+              const kind =
+                i < baseDots ? "base" : i < baseDots + convDots ? "conv" : "free";
+              const bg = kind === "conv" ? "#FFD21E" : kind === "base" ? "#F5A623" : "transparent";
+              const used = kind !== "free";
+              return (
+                <span
+                  key={i}
+                  style={{
+                    aspectRatio: "1 / 1",
+                    background: bg,
+                    border: used ? "none" : "1px solid rgba(255,230,203,0.16)",
+                    boxShadow: used ? `0 0 5px ${bg}aa` : "none",
+                    borderRadius: 1,
+                  }}
+                />
+              );
+            })}
+          </div>
+          {rows.map(([label, val, sw]) => (
+            <div
+              key={label}
+              className="hermes-mono flex items-center gap-2"
+              style={{ fontSize: 10, padding: "2px 0", fontVariantNumeric: "tabular-nums" }}
+            >
+              <span
+                style={{ width: 8, height: 8, background: sw, borderRadius: 1, flexShrink: 0 }}
+              />
+              <span
+                className="truncate"
+                style={{ color: "rgba(255,230,203,0.6)", flex: 1, minWidth: 0 }}
+              >
+                {label}
+              </span>
+              <span style={{ color: "rgba(255,230,203,0.85)" }}>~{fmtTokens(val)}</span>
+            </div>
+          ))}
+          <div
+            className="hermes-mono"
+            style={{
+              fontSize: 8.5,
+              color: "rgba(255,230,203,0.45)",
+              marginTop: 8,
+              paddingTop: 8,
+              borderTop: "1px solid rgba(255,230,203,0.1)",
+              lineHeight: 1.5,
+            }}
+          >
+            {modelLabel ? `${modelLabel} · ` : ""}auto-compacts at 80% · counts are
+            estimates (~)
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Composer model chip → searchable popover. Lists configured models grouped by
+// provider plus the user's Mixture-of-Agents presets as first-class "blends".
+function ComposerModelSelector({
+  data,
+  active,
+  onPick,
+}: {
+  data: HermesModelsData | undefined;
+  active: ChatModelPick | null;
+  onPick: (p: ChatModelPick) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const ql = q.trim().toLowerCase();
+  // Hide throwaway/test presets (e.g. "camera-test") from the picker.
+  const HIDE_PRESET = /(^|[-_ ])(test|demo|sample|example|scratch|tmp|temp)([-_ ]|$)/i;
+  const mixtures = (data?.mixtures ?? [])
+    .filter((m) => !HIDE_PRESET.test(m.name))
+    .filter(
+      (m) => !ql || m.name.toLowerCase().includes(ql) || "mixture of agents moa blend".includes(ql),
+    );
+  const cfgSet = new Set((data?.configured ?? []).map((s) => s.toLowerCase()));
+  const groups = (data?.catalog ?? [])
+    // Hide providers the user has no credentials for (empty set → show all),
+    // so a pick can't fail with "Unknown provider".
+    .filter((g) => cfgSet.size === 0 || cfgSet.has(g.provider.toLowerCase()))
+    .map((g) => ({
+      provider: g.provider,
+      models: g.models.filter(
+        (m) => !ql || m.name.toLowerCase().includes(ql) || g.provider.toLowerCase().includes(ql),
+      ),
+    }))
+    .filter((g) => g.models.length > 0);
+  const activeName = active ? shortModelName(active.name) : "default";
+  const defName = data?.default?.name;
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="hermes-mono inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] transition-colors"
+        style={{
+          background: "rgba(0,0,0,0.35)",
+          color: CREAM,
+          border: "1px solid rgba(255,230,203,0.25)",
+          borderRadius: 8,
+        }}
+        title="Switch the model for this conversation"
+      >
+        <span
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 999,
+            background: active?.mixture ? "#FFD21E" : providerTint(active?.provider ?? ""),
+          }}
+        />
+        <span className="truncate" style={{ maxWidth: 128 }}>
+          {activeName}
+          {active?.mixture ? " ⚝" : ""}
+        </span>
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full mb-2 left-0 z-50 flex flex-col"
+          style={{
+            width: 320,
+            maxHeight: 360,
+            background: "#0C2A28",
+            border: "1px solid rgba(255,230,203,0.18)",
+            borderRadius: 12,
+            boxShadow: "0 18px 50px rgba(0,0,0,0.6)",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: 8, borderBottom: "1px solid rgba(255,230,203,0.1)" }}>
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search models…"
+              className="hermes-mono w-full px-2 py-1.5 text-[11px] focus:outline-none"
+              style={{
+                background: "rgba(0,0,0,0.35)",
+                color: CREAM,
+                border: "1px solid rgba(255,230,203,0.18)",
+                borderRadius: 6,
+              }}
+            />
+          </div>
+          <div style={{ overflowY: "auto", padding: 6 }}>
+            {mixtures.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <div
+                  className="hermes-mono"
+                  style={{
+                    fontSize: 9,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "#FFD21E",
+                    padding: "4px 6px",
+                  }}
+                >
+                  Mixture of Agents
+                </div>
+                {mixtures.map((m) => {
+                  const isActive = !!active?.mixture && active.name === m.name;
+                  return (
+                    <button
+                      key={`moa-${m.name}`}
+                      type="button"
+                      onClick={() => {
+                        onPick({ provider: "moa", name: m.name, mixture: true, references: m.references });
+                        setOpen(false);
+                      }}
+                      className="w-full text-left flex items-center gap-2 px-2 py-1.5"
+                      style={{ borderRadius: 6, background: isActive ? "rgba(255,210,30,0.12)" : "transparent" }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = isActive ? "rgba(255,210,30,0.12)" : "rgba(255,230,203,0.06)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background = isActive ? "rgba(255,210,30,0.12)" : "transparent")
+                      }
+                    >
+                      <span style={{ width: 7, height: 7, borderRadius: 999, background: "#FFD21E", flexShrink: 0 }} />
+                      <span className="flex-1 min-w-0">
+                        <span className="hermes-mono block truncate" style={{ fontSize: 12, color: CREAM }}>
+                          {m.name} ⚝
+                        </span>
+                        <span className="hermes-mono block truncate" style={{ fontSize: 9, color: "rgba(255,230,203,0.5)" }}>
+                          {m.references} experts → {m.aggregator ? shortModelName(m.aggregator) : "aggregator"}
+                        </span>
+                      </span>
+                      {isActive && <Check className="h-3.5 w-3.5" style={{ color: "#FFD21E", flexShrink: 0 }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {groups.map((g) => (
+              <div key={g.provider} style={{ marginBottom: 4 }}>
+                <div
+                  className="hermes-mono flex items-center gap-1.5"
+                  style={{
+                    fontSize: 9,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "rgba(255,230,203,0.5)",
+                    padding: "4px 6px",
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: 999, background: providerTint(g.provider) }} />
+                  {providerLabel(g.provider)}
+                </div>
+                {g.models.map((m) => {
+                  const isActive =
+                    !active?.mixture && active?.name === m.name && active?.provider === g.provider;
+                  const isDefault = defName === m.name;
+                  return (
+                    <button
+                      key={`${g.provider}-${m.name}`}
+                      type="button"
+                      onClick={() => {
+                        onPick({ provider: g.provider, name: m.name });
+                        setOpen(false);
+                      }}
+                      className="w-full text-left flex items-center gap-2 px-2 py-1.5"
+                      style={{ borderRadius: 6, background: isActive ? "rgba(95,208,197,0.12)" : "transparent" }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = isActive ? "rgba(95,208,197,0.12)" : "rgba(255,230,203,0.06)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background = isActive ? "rgba(95,208,197,0.12)" : "transparent")
+                      }
+                    >
+                      <span className="hermes-mono flex-1 min-w-0 truncate" style={{ fontSize: 12, color: CREAM }}>
+                        {shortModelName(m.name)}
+                      </span>
+                      {isDefault && (
+                        <span
+                          className="hermes-mono"
+                          style={{
+                            fontSize: 8,
+                            letterSpacing: "0.1em",
+                            textTransform: "uppercase",
+                            color: "#5FD0C5",
+                            border: "1px solid rgba(95,208,197,0.4)",
+                            borderRadius: 4,
+                            padding: "1px 4px",
+                            flexShrink: 0,
+                          }}
+                        >
+                          default
+                        </span>
+                      )}
+                      {isActive && <Check className="h-3.5 w-3.5" style={{ color: "#5FD0C5", flexShrink: 0 }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {groups.length === 0 && mixtures.length === 0 && (
+              <div
+                className="hermes-mono"
+                style={{ fontSize: 11, color: "rgba(255,230,203,0.5)", padding: 12, textAlign: "center" }}
+              >
+                No models match “{q}”.
+              </div>
+            )}
+          </div>
+          <div
+            className="hermes-mono"
+            style={{
+              fontSize: 8.5,
+              color: "rgba(255,230,203,0.4)",
+              padding: "6px 10px",
+              borderTop: "1px solid rgba(255,230,203,0.1)",
+            }}
+          >
+            switches just this conversation · add more in `hermes model`
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Deterministic Hermes command menu — runs REAL `hermes <verb>` sub-commands
+// (no model call, sanitized output) plus a "Summarize & start fresh" action.
+// These are the honest equivalents of the interactive slash commands, which
+// can't execute through `hermes chat -Q -q` (that path sends text to the model).
+const HERMES_COMMANDS: Array<{ cmd: string; label: string; desc: string }> = [
+  { cmd: "insights", label: "Insights", desc: "real token usage, cost & model mix · 30d" },
+  { cmd: "status", label: "Status", desc: "providers, model & component health" },
+  { cmd: "doctor", label: "Doctor", desc: "diagnose your Hermes setup" },
+  { cmd: "version", label: "Version", desc: "build + version info" },
+  { cmd: "update", label: "Update Hermes", desc: "pull latest + reinstall · takes a minute" },
+];
+function ChatCommandsMenu({
+  onRun,
+  onSummarize,
+  busy,
+}: {
+  onRun: (cmd: string, label: string) => void;
+  onSummarize: () => void;
+  busy: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        className="hermes-mono inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+        style={{
+          background: "rgba(0,0,0,0.35)",
+          color: CREAM,
+          border: "1px solid rgba(255,230,203,0.25)",
+          borderRadius: 8,
+        }}
+        title="Run a real Hermes command"
+      >
+        <Terminal className="h-3 w-3 opacity-80" />
+        Commands
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full mb-2 left-0 z-50"
+          style={{
+            width: 288,
+            background: "#0C2A28",
+            border: "1px solid rgba(255,230,203,0.18)",
+            borderRadius: 12,
+            boxShadow: "0 18px 50px rgba(0,0,0,0.6)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            className="hermes-mono"
+            style={{
+              fontSize: 9,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: "rgba(255,230,203,0.5)",
+              padding: "10px 12px 6px",
+            }}
+          >
+            Hermes commands · real output
+          </div>
+          {HERMES_COMMANDS.map((c) => (
+            <button
+              key={c.cmd}
+              type="button"
+              onClick={() => {
+                onRun(c.cmd, c.label);
+                setOpen(false);
+              }}
+              className="w-full text-left flex flex-col px-3 py-2"
+              style={{ borderRadius: 6 }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,230,203,0.06)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              <span className="hermes-mono" style={{ fontSize: 12, color: CREAM }}>
+                {c.label}
+              </span>
+              <span className="hermes-mono" style={{ fontSize: 9, color: "rgba(255,230,203,0.5)" }}>
+                {c.desc}
+              </span>
+            </button>
+          ))}
+          <div style={{ borderTop: "1px solid rgba(255,230,203,0.1)", margin: "4px 0" }} />
+          <button
+            type="button"
+            onClick={() => {
+              onSummarize();
+              setOpen(false);
+            }}
+            className="w-full text-left flex flex-col px-3 py-2"
+            style={{ borderRadius: 6 }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,210,30,0.08)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+          >
+            <span className="hermes-mono" style={{ fontSize: 12, color: "#FFD21E" }}>
+              ⟳ Compact
+            </span>
+            <span className="hermes-mono" style={{ fontSize: 9, color: "rgba(255,230,203,0.5)" }}>
+              summarize this chat → continue on a fresh window
+            </span>
+          </button>
+          <div
+            className="hermes-mono"
+            style={{
+              fontSize: 8.5,
+              color: "rgba(255,230,203,0.4)",
+              padding: "6px 12px",
+              borderTop: "1px solid rgba(255,230,203,0.1)",
+            }}
+          >
+            real `hermes` sub-commands · no model call · keys &amp; paths redacted
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function HermesChat({
@@ -2214,6 +2957,121 @@ function HermesChatActive({
   // sends pass --resume so Hermes loads the prior turns as context.
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
+  // Per-conversation model override (null = Hermes' configured default) + a
+  // live context-window estimate. The composer surfaces both.
+  const modelsQ = useHermesModels();
+  const [pickedModel, setPickedModel] = useState<ChatModelPick | null>(null);
+  const activeModel: ChatModelPick | null =
+    pickedModel ??
+    (modelsQ.data?.default
+      ? {
+          provider: modelsQ.data.default.provider,
+          name: modelsQ.data.default.name,
+          context: modelsQ.data.default.context,
+        }
+      : null);
+  const ctxUsed = estChatTokens(messages, input);
+  const ctxLimit = modelCtxLimit(activeModel);
+  // "Summarize & start fresh" carries a distilled brief into the next session.
+  const [carryover, setCarryover] = useState<string | null>(null);
+
+  // Run a deterministic Hermes sub-command (no model call) and show its real,
+  // sanitized output as a monospace card in the thread.
+  async function runCommand(cmd: string, label: string) {
+    if (sending) return;
+    // `update` mutates the install — confirm before running it.
+    if (
+      cmd === "update" &&
+      !window.confirm(
+        "Update Hermes now? This pulls the latest version and reinstalls dependencies — it can take a minute.",
+      )
+    ) {
+      return;
+    }
+    setSending(true);
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "user", content: `▸ ${label}`, timestamp: Date.now() },
+    ]);
+    try {
+      const token =
+        (await fetch("/__token").then((r) => r.json()).catch(() => null))?.token ?? "";
+      const r = await fetch("/__hermes_cmd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-claude-os-token": token },
+        body: JSON.stringify({ cmd }),
+      });
+      const j = await r.json().catch(() => ({}));
+      const ok = j?.ok === true;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "hermes",
+          content: ok
+            ? String(j.output ?? "(no output)")
+            : `⚠ ${j?.error || `status ${r.status}`}`,
+          timestamp: Date.now(),
+          pre: ok,
+        },
+      ]);
+    } catch (e: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "hermes",
+          content: `⚠ ${e?.message ?? "command failed"}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // The honest "compact": ask the current model for a tight context brief, then
+  // open a fresh session seeded with it so the window is actually reclaimed.
+  async function summarizeAndReset() {
+    if (sending || messages.length === 0) return;
+    setSending(true);
+    setChatPhase("thinking");
+    const summary = await askHermes(
+      "Summarize our entire conversation so far into a tight but complete context brief — key facts, decisions, files/paths touched, and open threads — so a fresh session can continue seamlessly. Output ONLY the brief.",
+    ).catch(() => "");
+    setSending(false);
+    if (!summary || summary === "Done.") return;
+    startNewChat();
+    setCarryover(summary);
+    setMessages([
+      {
+        id: crypto.randomUUID(),
+        role: "hermes",
+        content: `**Carried over from your last session** — your next message continues with this context on a fresh, near-empty window.\n\n${summary}`,
+        timestamp: Date.now(),
+      },
+    ]);
+  }
+
+  // Slash palette — typing "/" surfaces the REAL, working actions (deterministic
+  // Hermes sub-commands + chat actions). These actually run, unlike Hermes'
+  // interactive slash commands, which can't execute through `hermes chat -q`.
+  const SLASH: Array<{ name: string; desc: string; run: () => void }> = [
+    { name: "compact", desc: "summarize → continue on a fresh window", run: () => void summarizeAndReset() },
+    { name: "insights", desc: "real usage analytics · 30d", run: () => runCommand("insights", "Insights") },
+    { name: "status", desc: "providers, model & health", run: () => runCommand("status", "Status") },
+    { name: "doctor", desc: "diagnose your setup", run: () => runCommand("doctor", "Doctor") },
+    { name: "version", desc: "build + version info", run: () => runCommand("version", "Version") },
+    { name: "update", desc: "update Hermes on your machine", run: () => runCommand("update", "Update Hermes") },
+    { name: "new", desc: "start a new chat", run: () => startNewChat() },
+  ];
+  const slashOpen = /^\/[a-z]*$/i.test(input);
+  const slashQ = slashOpen ? input.slice(1).toLowerCase() : "";
+  const slashMatches = slashOpen ? SLASH.filter((s) => s.name.startsWith(slashQ)) : [];
+  function runSlash(s: { run: () => void }) {
+    setInput("");
+    s.run();
+  }
 
   // Auto-grow textarea up to ~8 lines so longer drafts stay visible
   // instead of scrolling out of sight.
@@ -2340,6 +3198,7 @@ function HermesChatActive({
   async function loadSession(sessionId: string) {
     if (sending || loadingSession) return;
     setLoadingSession(true);
+    setCarryover(null); // don't let a pending compaction summary bleed into a loaded thread
     try {
       // Demo mode: synthesize a short canned conversation from the session's
       // firstUserMessage so screen-recordings and walkthrough demos can show
@@ -2406,6 +3265,7 @@ function HermesChatActive({
     setActiveSessionId(null);
     setMessages([]);
     setInput("");
+    setCarryover(null);
   }
 
   useEffect(() => {
@@ -2456,7 +3316,7 @@ function HermesChatActive({
       response = await fetch("/__hermes_chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { "X-Claude-OS-Token": token } : {}) },
-        body: JSON.stringify({ prompt, ...(sid ? { sessionId: sid } : {}), ...(toolsets !== undefined ? { toolsets } : {}), ...(useYolo ? { yolo: true } : {}) }),
+        body: JSON.stringify({ prompt, ...(sid ? { sessionId: sid } : {}), ...(toolsets !== undefined ? { toolsets } : {}), ...(useYolo ? { yolo: true } : {}), ...(pickedModel ? { model: pickedModel.name, provider: pickedModel.provider } : {}) }),
       });
     } catch { return "I couldn't reach the agent just now."; }
     if (!response.ok || !response.body) return "The agent endpoint returned an error.";
@@ -2478,7 +3338,7 @@ function HermesChatActive({
     }
     void queryClient.invalidateQueries({ queryKey: ["hermes-sessions"] });
     if (accumulated) fireIntel(accumulated);                 // light any tools/sources Hermes named in its reply
-    return accumulated.trim() || "Done.";
+    return cleanHermesReply(accumulated).trim() || "Done.";
   }
 
   async function handleSend() {
@@ -2501,7 +3361,10 @@ function HermesChatActive({
     // turns resume the session, which already carries it.
     const isFirstTurn = !activeSessionId && messages.length === 0;
     const seedPrefix = isFirstTurn && seedContext ? `${seedContext}\n\n---\n\n` : "";
-    const promptForServer = `${seedPrefix}${imagePrefix}${text}`.trim();
+    const carryPrefix = carryover
+      ? `Context carried over from our previous session:\n\n${carryover}\n\n---\n\n`
+      : "";
+    const promptForServer = `${seedPrefix}${carryPrefix}${imagePrefix}${text}`.trim();
     // Visible chat shows the user's actual text + a count of attachments
     // (the absolute path is noisy for display).
     const displayText =
@@ -2511,6 +3374,9 @@ function HermesChatActive({
     // The image paths are already baked into promptForServer above, so we
     // can clear UI state immediately.
     setAttachments([]);
+    // A carried-over summary ("Summarize & start fresh") seeds exactly one
+    // turn, then it's consumed.
+    if (carryover) setCarryover(null);
 
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -2552,6 +3418,8 @@ function HermesChatActive({
           ...(activeSessionId ? { sessionId: activeSessionId } : {}),
           ...(toolsets !== undefined ? { toolsets } : {}),
           ...(yolo ? { yolo: true, graph: true } : {}),
+          // Per-conversation model override (skipped when on the default).
+          ...(pickedModel ? { model: pickedModel.name, provider: pickedModel.provider } : {}),
         }),
       });
     } catch (err: any) {
@@ -2613,13 +3481,13 @@ function HermesChatActive({
               {
                 id: replyId,
                 role: "hermes",
-                content: accumulated.trimEnd(),
+                content: cleanHermesReply(accumulated).trimEnd(),
                 timestamp: Date.now(),
               },
             ]);
           } else {
             setMessages((prev) =>
-              prev.map((m) => (m.id === replyId ? { ...m, content: accumulated.trimEnd() } : m)),
+              prev.map((m) => (m.id === replyId ? { ...m, content: cleanHermesReply(accumulated).trimEnd() } : m)),
             );
           }
         } else if (eventName === "error") {
@@ -2739,10 +3607,10 @@ function HermesChatActive({
                     ? { color: BG, background: CREAM, borderColor: CREAM }
                     : { color: CREAM, borderColor: "rgba(255,230,203,0.55)", background: "rgba(255,230,203,0.08)" }
                 }
-                title="Show what the agent is doing under the hood"
+                title="Talk to Hermes by voice — and watch what it's doing live"
               >
-                <Activity className="h-3 w-3" />
-                Intelligence
+                <Mic className="h-3 w-3" />
+                Voice
               </button>
             </div>
           </div>
@@ -2777,7 +3645,7 @@ function HermesChatActive({
             {!loadingSession && !hasMessages && <ChatEmptyState />}
             {!loadingSession &&
               messages.map((m) => <ChatBubble key={m.id} message={m} />)}
-            {sending && <ChatTyping />}
+            {sending && chatPhase === "thinking" && <ChatTyping />}
           </div>
 
           {/* Input — multi-line auto-grow textarea with image attachments.
@@ -2877,6 +3745,81 @@ function HermesChatActive({
                 the RIGHT with icon + label inline. Everything stretches
                 via items-stretch + self-stretch so the heights line up
                 perfectly regardless of how many rows the textarea has. */}
+            {/* Slash palette — appears as you type "/" with the real, working
+                commands. Enter runs the top match. */}
+            {slashOpen && slashMatches.length > 0 && (
+              <div
+                className="mb-2"
+                style={{
+                  background: "#0C2A28",
+                  border: "1px solid rgba(255,230,203,0.18)",
+                  borderRadius: 10,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  className="hermes-mono"
+                  style={{
+                    fontSize: 8.5,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "rgba(255,230,203,0.45)",
+                    padding: "8px 12px 4px",
+                  }}
+                >
+                  Commands · Enter to run
+                </div>
+                {slashMatches.map((s, i) => (
+                  <button
+                    key={s.name}
+                    type="button"
+                    onClick={() => runSlash(s)}
+                    className="w-full text-left flex items-center justify-between px-3 py-2"
+                    style={{ background: i === 0 ? "rgba(255,230,203,0.06)" : "transparent" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,230,203,0.06)")}
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background =
+                        i === 0 ? "rgba(255,230,203,0.06)" : "transparent")
+                    }
+                  >
+                    <span className="hermes-mono" style={{ fontSize: 12, color: CREAM }}>
+                      /{s.name}
+                    </span>
+                    <span
+                      className="hermes-mono"
+                      style={{ fontSize: 9, color: "rgba(255,230,203,0.5)" }}
+                    >
+                      {s.desc}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* Composer toolbar — pick the model for this conversation (left)
+                and watch the context window fill (right). */}
+            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                <ComposerModelSelector
+                  data={modelsQ.data}
+                  active={activeModel}
+                  onPick={setPickedModel}
+                />
+                <ChatCommandsMenu
+                  onRun={runCommand}
+                  onSummarize={summarizeAndReset}
+                  busy={sending}
+                />
+              </div>
+              <ContextMeter
+                used={ctxUsed}
+                limit={ctxLimit}
+                modelLabel={
+                  activeModel
+                    ? `${shortModelName(activeModel.name)} · ${fmtTokens(ctxLimit)} window`
+                    : undefined
+                }
+              />
+            </div>
             <div className="flex items-stretch gap-2">
               <button
                 type="button"
@@ -2908,7 +3851,8 @@ function HermesChatActive({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    void handleSend();
+                    if (slashMatches.length > 0) runSlash(slashMatches[0]);
+                    else void handleSend();
                   }
                 }}
                 onPaste={(e) => {
@@ -3299,6 +4243,30 @@ function ChatEmptyState() {
   );
 }
 
+// Small hover-revealed "copy reply" affordance under each Hermes message.
+function CopyMsgButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  if (!text) return null;
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        const ok = await copyToClipboard(text);
+        if (ok) {
+          setDone(true);
+          window.setTimeout(() => setDone(false), 1400);
+        }
+      }}
+      className="hermes-mono inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.14em] transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100"
+      style={{ color: "rgba(255,230,203,0.55)" }}
+      title="Copy this reply"
+    >
+      {done ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      {done ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   if (isUser) {
@@ -3324,21 +4292,39 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   //  • Light markdown so model dashes/headers/`code` render as real
   //    structure rather than raw characters.
   return (
-    <div className="flex justify-start items-start gap-3">
+    <div className="flex justify-start items-start gap-3 group">
       <HermesAvatar />
-      <div
-        className="max-w-[88%] px-5 py-4 border"
-        style={{
-          background: "rgba(6,22,22,0.96)",
-          color: "#F3E9DA",
-          borderColor: "rgba(255,230,203,0.28)",
-        }}
-      >
-        {message.content ? (
-          <ChatMarkdown text={message.content} />
-        ) : (
-          <span style={{ opacity: 0.5 }}>…</span>
-        )}
+      <div className="flex flex-col items-start max-w-[88%]">
+        <div
+          className="px-5 py-4 border"
+          style={{
+            background: "rgba(6,22,22,0.96)",
+            color: "#F3E9DA",
+            borderColor: "rgba(255,230,203,0.28)",
+          }}
+        >
+          {message.pre ? (
+            <pre
+              className="hermes-mono"
+              style={{
+                fontSize: 11.5,
+                lineHeight: 1.5,
+                color: "#F3E9DA",
+                whiteSpace: "pre",
+                overflowX: "auto",
+                margin: 0,
+                maxWidth: "100%",
+              }}
+            >
+              {message.content}
+            </pre>
+          ) : message.content ? (
+            <ChatMarkdown text={message.content} />
+          ) : (
+            <span style={{ opacity: 0.5 }}>…</span>
+          )}
+        </div>
+        {message.content ? <CopyMsgButton text={message.content} /> : null}
       </div>
     </div>
   );
@@ -3552,25 +4538,42 @@ function HermesAvatar() {
 }
 
 function ChatTyping() {
+  // A live "thinking…" state with an elapsed counter so the pre-token latency
+  // (Hermes' single-query mode buffers the reply, so first output can be ~8s)
+  // reads as "working", not frozen.
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = window.setInterval(() => setSecs(Math.floor((Date.now() - t0) / 1000)), 250);
+    return () => window.clearInterval(id);
+  }, []);
   return (
     <div className="flex justify-start items-start gap-3">
       <HermesAvatar />
       <div
-        className="px-4 py-3 border flex items-center gap-1.5"
+        className="px-4 py-3 border flex items-center gap-2.5"
         style={{
           borderColor: "rgba(255,230,203,0.25)",
           background: "rgba(255,230,203,0.04)",
         }}
       >
-        <span className="h-1.5 w-1.5 rounded-none animate-pulse" style={{ background: CREAM }} />
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-none animate-pulse" style={{ background: CREAM }} />
+          <span
+            className="h-1.5 w-1.5 rounded-none animate-pulse"
+            style={{ background: CREAM, animationDelay: "0.15s" }}
+          />
+          <span
+            className="h-1.5 w-1.5 rounded-none animate-pulse"
+            style={{ background: CREAM, animationDelay: "0.3s" }}
+          />
+        </div>
         <span
-          className="h-1.5 w-1.5 rounded-none animate-pulse"
-          style={{ background: CREAM, animationDelay: "0.15s" }}
-        />
-        <span
-          className="h-1.5 w-1.5 rounded-none animate-pulse"
-          style={{ background: CREAM, animationDelay: "0.3s" }}
-        />
+          className="hermes-mono"
+          style={{ fontSize: 11, color: "rgba(255,230,203,0.6)", letterSpacing: "0.04em" }}
+        >
+          Hermes is thinking{secs >= 2 ? ` · ${secs}s` : "…"}
+        </span>
       </div>
     </div>
   );
@@ -3851,6 +4854,9 @@ function PantheonCatalog({ personas }: { personas: PersonaYaml[] }) {
         retune.
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {/* The Ministry of Experts (Mixture of Agents) is the first member of
+            the Pantheon — a council that answers as one. Expands inline. */}
+        <MinistryCard />
         {visible.map((p) => (
           <PersonaCard
             key={p.id}
@@ -7538,6 +8544,1837 @@ function CliCommandRow({ command }: { command: CliCommand }) {
         </div>
       )}
     </li>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Mixture of Agents (MoA) builder — compose a Hermes `moa` preset visually:
+// pick an aggregator (reads every proposal, writes the real answer, runs the
+// tools) + N reference models (propose in parallel, no tools), see an
+// indicative per-turn cost, then copy the exact config.yaml block / a plain-
+// English instruction / the activation command to hand to Hermes. Mirrors the
+// real schema (verified against Hermes v0.17.0):
+//   moa.presets.<name>.{ reference_models[], aggregator, reference_temperature,
+//                        aggregator_temperature, max_tokens, enabled }
+// Models + prices come from model-intel.json so they refresh with
+// `bun run refresh:models`. Every model routes via OpenRouter (one key reaches
+// all providers); power users can swap providers by editing the emitted YAML.
+// ────────────────────────────────────────────────────────────────────────────
+interface MoaModelOption {
+  key: string;
+  label: string;
+  vendorKey: string;
+  provider: string;
+  model: string;
+  tier: string;
+  inPerM: number;
+  outPerM: number;
+  /** Routed via the user's subscription (openai-codex) → $0 marginal. */
+  sub?: boolean;
+  /** Artificial Analysis Intelligence Index. */
+  intelligence?: number;
+  /** LMArena human-preference Elo — the fairer "power" ranking. */
+  arenaElo?: number;
+  speedTps?: number;
+  context?: number;
+}
+
+// Indicative cost uses a round, honest token assumption so the figure is
+// comparable across presets (real spend scales with your actual tokens).
+const MOA_IN_TOKENS = 1000;
+const MOA_OUT_TOKENS = 1000;
+function moaCallCost(m: MoaModelOption | undefined): number {
+  if (!m) return 0;
+  return (MOA_IN_TOKENS * m.inPerM + MOA_OUT_TOKENS * m.outPerM) / 1_000_000;
+}
+function moaUsd(n: number): string {
+  if (!isFinite(n) || n <= 0) return "$0";
+  if (n >= 1) return "$" + n.toFixed(2);
+  if (n >= 0.01) return "$" + n.toFixed(3);
+  return "$" + n.toFixed(4);
+}
+
+function moaYaml(
+  name: string,
+  refs: MoaModelOption[],
+  agg: MoaModelOption | undefined,
+  refTemp: number,
+  aggTemp: number,
+  maxTokens: number,
+): string {
+  const refLines = refs.length
+    ? refs
+        .map((r) => `        - { provider: ${r.provider}, model: ${r.model} }`)
+        .join("\n")
+    : "        # pick at least one reference model";
+  const aggLine = agg
+    ? `{ provider: ${agg.provider}, model: ${agg.model} }`
+    : "{ provider: openrouter, model: anthropic/claude-opus-4.8 }";
+  return `moa:
+  default_preset: ${name}
+  presets:
+    ${name}:
+      reference_models:
+${refLines}
+      aggregator: ${aggLine}
+      reference_temperature: ${refTemp}
+      aggregator_temperature: ${aggTemp}
+      max_tokens: ${maxTokens}
+      enabled: true`;
+}
+
+function moaInstruction(
+  name: string,
+  refs: MoaModelOption[],
+  agg: MoaModelOption | undefined,
+  refTemp: number,
+  aggTemp: number,
+  maxTokens: number,
+): string {
+  const refList = refs.length
+    ? refs.map((r) => `${r.provider}:${r.model}`).join(", ")
+    : "(none chosen yet)";
+  const aggStr = agg ? `${agg.provider}:${agg.model}` : "(none chosen yet)";
+  return `Set up a Mixture of Agents preset in your Hermes config (~/.hermes/config.yaml, under moa.presets).
+
+Preset name: ${name}
+Reference models (run in parallel, no tools): ${refList}
+Aggregator (reads the proposals, writes the answer, runs tools): ${aggStr}
+reference_temperature: ${refTemp}, aggregator_temperature: ${aggTemp}, max_tokens: ${maxTokens}, enabled: true
+
+Write it into the config, then run \`hermes moa list\` to confirm. I'll use it with \`/model ${name} --provider moa\`.`;
+}
+
+function MoaModelDropdown({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: MoaModelOption[];
+  onChange: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const cur = options.find((o) => o.key === value);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full hermes-mono text-[12px] px-3 py-2.5 border inline-flex items-center gap-2 text-left transition-colors"
+        style={{
+          background: "rgba(0,0,0,0.4)",
+          color: CREAM,
+          borderColor: open ? CREAM : "rgba(255,230,203,0.4)",
+        }}
+      >
+        <ProviderLogoChip provider={cur?.vendorKey ?? null} size={18} />
+        <span className="flex-1 truncate">{cur?.label ?? "Select a model"}</span>
+        {cur && (
+          <span style={{ color: "rgba(255,230,203,0.55)" }}>
+            {moaUsd(moaCallCost(cur))}/call
+          </span>
+        )}
+        <span style={{ color: "rgba(255,230,203,0.55)" }}>▾</span>
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto border"
+          style={{
+            background: BG,
+            borderColor: CREAM,
+            boxShadow: "0 16px 40px rgba(0,0,0,0.6)",
+          }}
+        >
+          {options.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => {
+                onChange(o.key);
+                setOpen(false);
+              }}
+              className="w-full px-3 py-2 inline-flex items-center gap-2 text-left transition-colors hover:bg-white/5"
+              style={{ color: o.key === value ? CREAM : "rgba(255,230,203,0.8)" }}
+            >
+              <ProviderLogoChip provider={o.vendorKey} size={16} />
+              <span className="hermes-mono text-[11.5px] flex-1 truncate">
+                {o.label}
+              </span>
+              <span
+                className="hermes-mono text-[9px] uppercase tracking-[0.18em]"
+                style={{ color: "rgba(255,230,203,0.4)" }}
+              >
+                {o.tier}
+              </span>
+              <span
+                className="hermes-mono text-[10px]"
+                style={{ color: "rgba(255,230,203,0.5)" }}
+              >
+                {moaUsd(moaCallCost(o))}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoaNum({
+  label,
+  value,
+  onChange,
+  step,
+  min,
+  max,
+  integer,
+}: {
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+  step: number;
+  min: number;
+  max: number;
+  integer?: boolean;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span
+        className="hermes-mono text-[8.5px] uppercase tracking-[0.18em]"
+        style={{ color: "rgba(255,230,203,0.5)" }}
+      >
+        {label}
+      </span>
+      <input
+        type="number"
+        value={value}
+        step={step}
+        min={min}
+        max={max}
+        onChange={(e) => {
+          const n = integer
+            ? parseInt(e.target.value, 10)
+            : parseFloat(e.target.value);
+          if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
+        }}
+        className="hermes-mono text-[12px] px-2 py-1.5 border focus:outline-none"
+        style={{
+          background: "rgba(0,0,0,0.4)",
+          color: CREAM,
+          borderColor: "rgba(255,230,203,0.35)",
+        }}
+      />
+    </label>
+  );
+}
+
+function MoaCopyBlock({
+  label,
+  hint,
+  text,
+}: {
+  label: string;
+  hint?: string;
+  text: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  function handleCopy() {
+    void copyToClipboard(text).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <div
+      className="border"
+      style={{ borderColor: "rgba(255,230,203,0.3)", background: CODE_BG }}
+    >
+      <div
+        className="flex items-center justify-between px-3 py-1.5 border-b gap-3"
+        style={{ borderColor: "rgba(255,230,203,0.18)" }}
+      >
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span
+            className="hermes-mono text-[9.5px] uppercase tracking-[0.22em] shrink-0"
+            style={{ color: CREAM }}
+          >
+            {label}
+          </span>
+          {hint && (
+            <span
+              className="text-[10.5px] truncate"
+              style={{
+                color: "rgba(255,230,203,0.45)",
+                fontFamily: '"Fraunces", serif',
+              }}
+            >
+              {hint}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="hermes-mono text-[9px] uppercase tracking-[0.2em] px-2 py-1 border transition-colors shrink-0"
+          style={{
+            color: copied ? "#86efac" : "rgba(255,230,203,0.85)",
+            borderColor: copied ? "rgba(134,239,172,0.6)" : "rgba(255,230,203,0.3)",
+            background: copied ? "rgba(134,239,172,0.1)" : "transparent",
+          }}
+        >
+          {copied ? "✓ Copied" : "Copy"}
+        </button>
+      </div>
+      <pre
+        className="hermes-mono text-[11px] leading-relaxed p-3 overflow-x-auto whitespace-pre-wrap"
+        style={{ color: "rgba(255,230,203,0.92)" }}
+      >
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Ministry of Experts — the first member of the Pantheon. A Mixture-of-Agents
+// (moa) builder dressed as a persona card: a council of up to 3 expert models
+// proposing in parallel + one core model (the aggregator) that reads every
+// proposal, writes the final answer, and runs the tools. The card expands inline
+// to the full row; you pick the core + experts from the live roster
+// (model-intel.json) and copy ONE prompt that tells Hermes to configure the
+// preset itself (it verifies the slugs + asks you if it can't reach a model).
+// Schema verified against Hermes v0.17.0. Logos are bundled lobehub SVGs.
+// ────────────────────────────────────────────────────────────────────────────
+const MINISTRY_VENDOR_LOGO: Record<string, string> = {
+  claude: logoVendorClaude,
+  openai: logoVendorOpenAI,
+  gemini: logoVendorGemini,
+  grok: logoVendorGrok,
+  deepseek: logoVendorDeepseek,
+  minimax: logoVendorMinimax,
+  zai: logoVendorZai,
+  qwen: logoVendorQwen,
+  moonshot: logoVendorMoonshot,
+  tencent: logoVendorTencent,
+  xiaomi: logoVendorXiaomi,
+  nvidia: logoVendorNvidia,
+  mistral: logoVendorMistral,
+  meta: logoVendorMeta,
+  llama: logoVendorMeta,
+  cohere: logoVendorCohere,
+};
+// These four ship as fill="currentColor" → invisible on dark until tinted white.
+const MINISTRY_MONO_VENDORS = new Set(["openai", "grok", "moonshot", "xiaomi"]);
+const MINISTRY_DOCS_URL =
+  "https://hermes-agent.nousresearch.com/docs/user-guide/features/mixture-of-agents";
+
+function VendorLogo({
+  vendorKey,
+  size = 40,
+  onLight = false,
+}: {
+  vendorKey: string;
+  size?: number;
+  onLight?: boolean;
+}) {
+  const key = (vendorKey || "").toLowerCase();
+  // OpenAI → the green brand mark (consistent with the rest of the app).
+  if (key === "openai" || key === "openai-codex" || key === "codex") {
+    return (
+      <span
+        className="inline-flex items-center justify-center shrink-0"
+        style={{ width: size, height: size }}
+      >
+        <ModelLogo model="openai" size={Math.round(size * 0.92)} />
+      </span>
+    );
+  }
+  const src = MINISTRY_VENDOR_LOGO[key];
+  if (!src) {
+    return (
+      <span
+        className="inline-flex items-center justify-center shrink-0 rounded"
+        style={{
+          width: size,
+          height: size,
+          background: "rgba(255,230,203,0.12)",
+          color: CREAM,
+          fontWeight: 700,
+          fontSize: size * 0.4,
+        }}
+      >
+        {key.slice(0, 2).toUpperCase()}
+      </span>
+    );
+  }
+  // Mono marks are stored dark and inverted to white on the dark page; keep
+  // them natural (dark) on a light/white circle so they still read.
+  const invert = MINISTRY_MONO_VENDORS.has(key) && !onLight;
+  return (
+    <span
+      className="inline-flex items-center justify-center shrink-0"
+      style={{ width: size, height: size }}
+    >
+      <img
+        src={src}
+        alt={`${vendorKey} logo`}
+        className="object-contain"
+        style={{
+          width: size,
+          height: size,
+          filter: invert ? "brightness(0) invert(1)" : undefined,
+        }}
+        loading="lazy"
+      />
+    </span>
+  );
+}
+
+// Compact 1–4 glyph $ indicator from a model's per-call cost.
+function ministryCostTier(o: MoaModelOption): string {
+  if (o.sub) return "sub";
+  const c = moaCallCost(o);
+  if (c >= 0.03) return "$$$$";
+  if (c >= 0.012) return "$$$";
+  if (c >= 0.004) return "$$";
+  return "$";
+}
+
+function ministryPrompt(
+  core: MoaModelOption | undefined,
+  experts: MoaModelOption[],
+  maxTokens = 4096,
+): string {
+  const expLines = experts.length
+    ? experts
+        .map((e) => `  • ${e.label} — provider: ${e.provider}, model: ${e.model}`)
+        .join("\n")
+    : "  • (pick 1–3 experts)";
+  const coreLine = core
+    ? `${core.label} — provider: ${core.provider}, model: ${core.model}`
+    : "(pick a core model)";
+  return `Hey Hermes — set up a Mixture of Agents preset for me (your \`moa\` feature, added in a recent release; docs: ${MINISTRY_DOCS_URL}). Call it "ministry".
+
+CORE MODEL — the aggregator. Reads every expert's proposal, writes the final answer, runs the tools:
+  • ${coreLine}
+
+EXPERTS — the reference models. Each proposes in parallel (no tools); the core then decides:
+${expLines}
+
+Write this under moa.presets in ~/.hermes/config.yaml, with provider and model as SEPARATE keys (not colon-joined). Use reference_temperature 0.6, aggregator_temperature 0.4, max_tokens ${maxTokens}, enabled: true.
+
+Before writing, verify each model id is valid for my configured providers. If you don't know where to get one of these models, or I don't have access to it, ASK me about it — don't guess. Then run \`hermes moa list\` to confirm, and tell me to activate it with /model ministry --provider moa.`;
+}
+
+// Live OpenRouter pricing → { openrouterId: { inPerM, outPerM } }. Keyless +
+// CORS-open, so it works in the distributed dashboard with zero setup.
+function useOpenRouterPrices() {
+  return useQuery<Record<string, { inPerM: number; outPerM: number }>>({
+    queryKey: ["openrouter-prices"],
+    queryFn: async () => {
+      const r = await fetch("https://openrouter.ai/api/v1/models");
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      const j = await r.json();
+      const map: Record<string, { inPerM: number; outPerM: number }> = {};
+      for (const m of j?.data ?? []) {
+        const i = parseFloat(m?.pricing?.prompt ?? "");
+        const o = parseFloat(m?.pricing?.completion ?? "");
+        if (Number.isFinite(i) && Number.isFinite(o))
+          map[m.id] = { inPerM: i * 1e6, outPerM: o * 1e6 };
+      }
+      return map;
+    },
+    staleTime: 1000 * 60 * 30,
+    retry: 1,
+  });
+}
+
+type LivePrices = Record<string, { inPerM: number; outPerM: number }> | undefined;
+
+function ministryFmtUsd(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (n >= 10) return `$${Math.round(n)}`;
+  if (n >= 0.01) return `$${n.toFixed(2)}`;
+  return `$${n.toFixed(3)}`;
+}
+function ministryRate(o: MoaModelOption, live: LivePrices) {
+  return (live && live[o.model]) || { inPerM: o.inPerM, outPerM: o.outPerM };
+}
+
+// Warm Hermes cream leads (readable, on-brand); amber for the core only.
+const MOA_TEAL = "#FFE6CB";
+const MOA_GOLD = "#FFD21E";
+// Per-vendor accent so every model box reads as its own colour at a glance.
+const MINISTRY_VENDOR_COLOR: Record<string, string> = {
+  claude: "#D97757",
+  anthropic: "#D97757",
+  openai: "#10A37F",
+  gemini: "#4285F4",
+  google: "#4285F4",
+  deepseek: "#4D6BFE",
+  grok: "#9CA3AF",
+  xai: "#9CA3AF",
+  minimax: "#FF6B4A",
+  zai: "#5B8FF9",
+  qwen: "#A855F7",
+  moonshot: "#6366F1",
+  mistral: "#FA520F",
+  nvidia: "#76B900",
+  tencent: "#3B82F6",
+  xiaomi: "#FF6900",
+  cohere: "#39594D",
+  meta: "#0467DF",
+  llama: "#0467DF",
+};
+function ministryVendorColor(v: string): string {
+  return MINISTRY_VENDOR_COLOR[(v || "").toLowerCase()] ?? "#94A3B8";
+}
+
+// "Power" = LMArena Elo (human preference) — fairer to strong open models than
+// the AA intelligence index. Falls back to an Elo-shaped estimate from aaIndex
+// when a model has no Arena rating yet, so the bar still renders.
+// Real Arena AGENT net-improvement % where we have it (arena.ai/leaderboard/agent),
+// else the general Arena Elo mapped BELOW the agent band — so agent-proven models
+// lead (the Ministry is about AGENTS, where Opus 4.8 > Gemini, not general chat).
+const AGENT_SCORE: Record<string, number> = Object.fromEntries(
+  (
+    (modelIntel as unknown as { models?: Array<Record<string, any>> }).models ?? []
+  )
+    .filter((m) => typeof m.benchmarks?.arenaAgent === "number")
+    .map((m) => [String(m.id), m.benchmarks.arenaAgent as number]),
+);
+function ministryScoreOf(
+  id: string,
+  arenaElo?: number,
+  intelligence?: number,
+): number {
+  const a = AGENT_SCORE[id];
+  if (typeof a === "number") return 100 + a; // agent-proven sits above general Elo
+  const elo = arenaElo ?? 1380 + (intelligence ?? 40);
+  return Math.max(0, Math.min(95, (elo - 1400) * 0.9));
+}
+function ministryPower(o: MoaModelOption): number {
+  return ministryScoreOf(o.key, o.arenaElo, o.intelligence);
+}
+function ministryPowerLabel(o: MoaModelOption): string {
+  const a = AGENT_SCORE[o.key];
+  if (typeof a === "number") return `+${a.toFixed(1)}%`;
+  if (typeof o.arenaElo === "number") return `~${o.arenaElo}`;
+  return "—";
+}
+
+// A always-visible palette box. Body click toggles it as an expert; the ♛
+// sets it as the core. Selected → coloured (teal expert / gold core), never dimmed.
+// Global LMArena rank (1 = top) across every rated model in the dataset.
+const ARENA_RANK: Record<string, number> = (() => {
+  const rated = (
+    (modelIntel as unknown as { models?: Array<Record<string, any>> }).models ?? []
+  )
+    .filter(
+      (m) =>
+        typeof m.benchmarks?.lmarenaElo === "number" ||
+        typeof m.benchmarks?.arenaAgent === "number",
+    )
+    .map((m) => ({
+      id: String(m.id),
+      score: ministryScoreOf(
+        String(m.id),
+        m.benchmarks?.lmarenaElo,
+        m.benchmarks?.aaIndex,
+      ),
+    }))
+    .sort((a, b) => b.score - a.score);
+  const map: Record<string, number> = {};
+  rated.forEach((r, i) => (map[r.id] = i + 1));
+  return map;
+})();
+function ministryArenaRank(o: MoaModelOption): number | null {
+  return ARENA_RANK[o.key] ?? null;
+}
+// Green (#1) → dark red (#20+) by Arena standing, so rank reads at a glance.
+function ministryRankColor(rank: number | null): string {
+  if (!rank) return "rgba(255,230,203,0.4)";
+  const t = Math.min(1, Math.max(0, (rank - 1) / 19)); // 0 at #1 … 1 at #20
+  const hue = 140 - 140 * t; // green → red
+  const light = 58 - 20 * t; // darker as it worsens
+  return `hsl(${Math.round(hue)}, 70%, ${Math.round(light)}%)`;
+}
+// Cheap (green) → expensive (dark red), log-scaled across real $/M.
+function ministryCostColor(outPerM: number, sub?: boolean): string {
+  if (sub) return "#86efac";
+  const t = Math.min(
+    1,
+    Math.max(
+      0,
+      (Math.log10(Math.max(0.1, outPerM)) - Math.log10(0.2)) /
+        (Math.log10(40) - Math.log10(0.2)),
+    ),
+  );
+  const hue = 140 - 140 * t;
+  const light = 58 - 20 * t;
+  return `hsl(${Math.round(hue)}, 70%, ${Math.round(light)}%)`;
+}
+// Fast (green) → slow (red), so speed reads at a glance like cost + rank.
+function ministrySpeedColor(tps?: number): string {
+  if (!tps) return "rgba(255,230,203,0.4)";
+  const t = Math.min(1, Math.max(0, tps / 150)); // 0 slow → 1 fast
+  const hue = 140 * t; // red (slow) → green (fast)
+  return `hsl(${Math.round(hue)}, 70%, 56%)`;
+}
+// Top-20 score band, for a "performance vs the top 20" bar.
+const MINISTRY_SCORES = (
+  (modelIntel as unknown as { models?: Array<Record<string, any>> }).models ?? []
+)
+  .map((m) =>
+    ministryScoreOf(String(m.id), m.benchmarks?.lmarenaElo, m.benchmarks?.aaIndex),
+  )
+  .sort((a, b) => b - a);
+const SCORE_TOP1 = MINISTRY_SCORES[0] ?? 100;
+const SCORE_TOP20 = MINISTRY_SCORES[Math.min(19, MINISTRY_SCORES.length - 1)] ?? 0;
+function ministryPerfVsTop20(o: MoaModelOption): number {
+  const s = ministryScoreOf(o.key, o.arenaElo, o.intelligence);
+  return Math.max(
+    0.05,
+    Math.min(1, (s - SCORE_TOP20) / Math.max(1, SCORE_TOP1 - SCORE_TOP20)),
+  );
+}
+// Full model-intel record by id — powers the analytics card (description, etc.).
+const INTEL_BY_ID: Record<string, any> = Object.fromEntries(
+  (
+    (modelIntel as unknown as { models?: Array<Record<string, any>> }).models ?? []
+  ).map((m) => [String(m.id), m]),
+);
+
+// A bench card — a distinct rounded, bordered, draggable model. Drag onto a
+// seat, or click to "arm" then click a seat. Hovering previews its analytics.
+function PaletteModelBox({
+  o,
+  role,
+  index,
+  armed,
+  sortBy,
+  onArm,
+  onDragKey,
+  onFocus,
+}: {
+  o: MoaModelOption;
+  role: "core" | "expert" | null;
+  index: number;
+  armed: boolean;
+  sortBy: "arena" | "cost" | "speed";
+  onArm: (k: string) => void;
+  onDragKey: (k: string | null) => void;
+  onFocus: (k: string) => void;
+}) {
+  const isCore = role === "core";
+  const isExpert = role === "expert";
+  const selColor = isCore ? MOA_GOLD : isExpert || armed ? MOA_TEAL : null;
+  const rank = ministryArenaRank(o);
+  // The bench row shows the metric you're ranking by, in its own colour scale.
+  const metric =
+    sortBy === "cost"
+      ? o.sub
+        ? "subscription"
+        : `${ministryFmtUsd(o.outPerM)}/M`
+      : sortBy === "speed"
+        ? o.speedTps
+          ? `${Math.round(o.speedTps)} t/s`
+          : "—"
+        : rank
+          ? `Arena #${rank}`
+          : "unranked";
+  const metricColor =
+    sortBy === "cost"
+      ? ministryCostColor(o.outPerM, o.sub)
+      : sortBy === "speed"
+        ? ministrySpeedColor(o.speedTps)
+        : ministryRankColor(rank);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", o.key);
+        e.dataTransfer.effectAllowed = "copy";
+        onDragKey(o.key);
+      }}
+      onDragEnd={() => onDragKey(null)}
+      onClick={() => onArm(o.key)}
+      onMouseEnter={() => onFocus(o.key)}
+      title={`${o.label} — drag onto a seat, or click then click a seat`}
+      className="flex items-center gap-2 p-1.5 cursor-grab active:cursor-grabbing transition-all hover:-translate-y-px"
+      style={{
+        borderRadius: 10,
+        border: `1px solid ${selColor ?? "rgba(255,230,203,0.16)"}`,
+        background: selColor ? `${selColor}14` : "rgba(255,255,255,0.02)",
+        boxShadow: selColor ? `0 0 10px ${selColor}33` : undefined,
+      }}
+    >
+      <span
+        className="inline-flex items-center justify-center rounded-full shrink-0"
+        style={{
+          width: 28,
+          height: 28,
+          background: "radial-gradient(circle at 50% 38%, #ffffff, #ece7db)",
+        }}
+      >
+        <VendorLogo vendorKey={o.vendorKey} size={18} onLight />
+      </span>
+      <span className="flex-1 min-w-0 leading-tight">
+        <span
+          className="hermes-mono text-[10px] truncate block"
+          style={{ color: CREAM }}
+        >
+          {o.label}
+        </span>
+        <span
+          className="hermes-mono text-[8px]"
+          style={{ color: metricColor }}
+        >
+          {metric}
+        </span>
+      </span>
+      {isCore && (
+        <span
+          className="inline-flex items-center justify-center rounded-full shrink-0"
+          style={{ width: 14, height: 14, background: MOA_GOLD, color: BG }}
+        >
+          <Crown style={{ width: 9, height: 9 }} />
+        </span>
+      )}
+      {isExpert && (
+        <span
+          className="hermes-mono text-[8px] inline-flex items-center justify-center rounded-full shrink-0"
+          style={{ width: 14, height: 14, background: MOA_TEAL, color: BG }}
+        >
+          {index + 1}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Bottom-left analytics — shows the hovered/selected model's stats as 3 bars.
+function AnalyticsRow({
+  label,
+  value,
+  bar,
+  color,
+  hint,
+}: {
+  label: string;
+  value: string;
+  bar: number;
+  color: string;
+  hint?: string;
+}) {
+  return (
+    <div
+      className="flex items-center gap-2"
+      style={{ minHeight: 16 }}
+      title={hint}
+    >
+      <span
+        className="hermes-mono text-[8px] uppercase tracking-[0.14em] w-[58px] shrink-0 whitespace-nowrap"
+        style={{ color: "rgba(255,230,203,0.4)" }}
+      >
+        {label}
+      </span>
+      <span
+        className="relative inline-block flex-1"
+        style={{ height: 5, background: "rgba(255,255,255,0.08)", borderRadius: 3 }}
+      >
+        <span
+          className="absolute left-0 top-0 h-full"
+          style={{
+            width: `${Math.max(5, Math.min(100, Math.round((bar || 0) * 100)))}%`,
+            background: color,
+            borderRadius: 3,
+          }}
+        />
+      </span>
+      <span
+        className="hermes-mono text-[9px] tabular-nums w-[58px] text-right shrink-0 whitespace-nowrap"
+        style={{ color: CREAM }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function MinistryAnalytics({
+  model,
+  lineup,
+  live,
+}: {
+  model: MoaModelOption | undefined;
+  lineup: MoaModelOption[];
+  live: LivePrices;
+}) {
+  const pool = model ? [model, ...lineup] : lineup;
+  const maxOut = Math.max(
+    ...pool.map((m) => ministryRate(m, live).outPerM || 0),
+    0.01,
+  );
+  const maxSpeed = Math.max(...pool.map((m) => m.speedTps ?? 0), 1);
+  const rate = model ? ministryRate(model, live) : { inPerM: 0, outPerM: 0 };
+  const intel = model ? INTEL_BY_ID[model.key] : undefined;
+  const rank = model ? ministryArenaRank(model) : null;
+  const ctx = model?.context
+    ? model.context >= 1_000_000
+      ? `${Math.round(model.context / 1_000_000)}M context`
+      : `${Math.round(model.context / 1000)}K context`
+    : null;
+  return (
+    <div
+      className="p-3.5"
+      style={{
+        borderRadius: 12,
+        border: "1px solid rgba(255,230,203,0.18)",
+        background:
+          "linear-gradient(155deg, rgba(255,230,203,0.05), rgba(255,255,255,0.012))",
+        boxShadow: "0 14px 30px -16px rgba(0,0,0,0.6)",
+      }}
+    >
+      {model ? (
+        <>
+          <div className="flex items-center gap-3 mb-2">
+            <span
+              className="inline-flex items-center justify-center rounded-full shrink-0"
+              style={{
+                width: 42,
+                height: 42,
+                background: "radial-gradient(circle at 50% 36%, #ffffff, #ece7db)",
+                boxShadow: "0 6px 14px -4px rgba(0,0,0,0.5)",
+              }}
+            >
+              <VendorLogo vendorKey={model.vendorKey} size={26} onLight />
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span
+                  className="truncate"
+                  style={{
+                    fontFamily: '"Fraunces", serif',
+                    fontSize: 16,
+                    color: CREAM,
+                  }}
+                >
+                  {model.label}
+                </span>
+                {rank && (
+                  <span
+                    className="hermes-mono text-[9px] px-1.5 py-0.5 shrink-0"
+                    style={{
+                      borderRadius: 5,
+                      color: ministryRankColor(rank),
+                      border: `1px solid ${ministryRankColor(rank)}`,
+                      background: "rgba(0,0,0,0.25)",
+                    }}
+                  >
+                    Arena #{rank}
+                  </span>
+                )}
+              </div>
+              <div
+                className="hermes-mono text-[8px] uppercase tracking-[0.16em] truncate"
+                style={{ color: "rgba(255,230,203,0.42)" }}
+              >
+                {[intel?.vendor, model.tier, ctx].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+          </div>
+          {intel?.oneLiner && (
+            <p
+              className="mb-3"
+              style={{
+                fontFamily: '"Fraunces", serif',
+                fontSize: 11.5,
+                lineHeight: 1.45,
+                color: "rgba(255,230,203,0.7)",
+              }}
+            >
+              {intel.oneLiner}
+            </p>
+          )}
+          <div className="flex flex-col gap-2">
+            <AnalyticsRow
+              label="Agent"
+              hint="Arena agent leaderboard — net improvement vs the top 20"
+              value={ministryPowerLabel(model)}
+              bar={ministryPerfVsTop20(model)}
+              color={ministryRankColor(rank)}
+            />
+            <AnalyticsRow
+              label="Cost / M"
+              hint="Live OpenRouter output price per million tokens"
+              value={model.sub ? "sub" : ministryFmtUsd(rate.outPerM)}
+              bar={model.sub ? 0.06 : rate.outPerM / maxOut}
+              color={ministryCostColor(rate.outPerM, model.sub)}
+            />
+            <AnalyticsRow
+              label="Speed"
+              value={model.speedTps ? `${Math.round(model.speedTps)} t/s` : "—"}
+              bar={model.speedTps ? model.speedTps / maxSpeed : 0}
+              color={ministrySpeedColor(model.speedTps)}
+            />
+          </div>
+          <div
+            className="hermes-mono text-[7.5px] uppercase tracking-[0.16em] mt-2.5"
+            style={{ color: "rgba(255,230,203,0.28)" }}
+          >
+            arena agent score · vs top 20 · live OpenRouter cost
+          </div>
+        </>
+      ) : (
+        <div
+          className="hermes-mono text-[9px] py-4 text-center"
+          style={{ color: "rgba(255,230,203,0.3)" }}
+        >
+          hover a model to inspect it
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A council seat — a drop target + click target. Core and expert seats behave
+// identically; the crown is a permanent property of the top seat. Brand-tinted
+// dark "coin", hover-× to remove (on every seat, core included).
+function CouncilSeat({
+  seat,
+  o,
+  armed,
+  dragActive,
+  onPlace,
+  onDropKey,
+  onRemove,
+}: {
+  seat: "core" | number;
+  o: MoaModelOption | undefined;
+  armed: boolean;
+  dragActive: boolean;
+  onPlace: (seat: "core" | number) => void;
+  onDropKey: (seat: "core" | number, key: string) => void;
+  onRemove: (seat: "core" | number) => void;
+}) {
+  const isCore = seat === "core";
+  const empty = !o;
+  const [over, setOver] = useState(false);
+  const ring = isCore ? 100 : 72;
+  const logo = isCore ? 52 : 38;
+  const droppable = armed || dragActive;
+  return (
+    <div
+      className="group relative flex flex-col items-center gap-2"
+      style={{ width: isCore ? 168 : 116 }}
+    >
+      <span
+        className="hermes-mono text-[8px] uppercase tracking-[0.22em]"
+        style={{
+          color: isCore ? "rgba(255,230,203,0.7)" : "rgba(255,230,203,0.7)",
+        }}
+      >
+        {isCore ? "Core · Orchestrator" : `Expert ${(seat as number) + 1}`}
+      </span>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          const k = e.dataTransfer.getData("text/plain");
+          if (k) onDropKey(seat, k);
+        }}
+        onClick={() => {
+          if (armed) onPlace(seat);
+        }}
+        className="relative inline-flex items-center justify-center rounded-full transition-all"
+        style={{
+          width: ring,
+          height: ring,
+          cursor: armed ? "pointer" : "default",
+          background: empty
+            ? "rgba(255,255,255,0.04)"
+            : "radial-gradient(circle at 50% 38%, #ffffff, #ece7db)",
+          border: empty
+            ? `1px dashed ${over || droppable ? "rgba(255,230,203,0.7)" : "rgba(255,230,203,0.3)"}`
+            : "none",
+          boxShadow: empty
+            ? over
+              ? "0 0 0 3px rgba(255,230,203,0.3)"
+              : undefined
+            : `0 10px 24px -6px rgba(0,0,0,0.5)${over ? ", 0 0 0 3px rgba(255,230,203,0.65)" : ""}`,
+          transform: over ? "scale(1.05)" : undefined,
+        }}
+      >
+        {empty ? (
+          <span
+            className="text-[20px] leading-none"
+            style={{ color: "rgba(255,230,203,0.6)" }}
+          >
+            +
+          </span>
+        ) : (
+          <VendorLogo vendorKey={o.vendorKey} size={logo} onLight />
+        )}
+        {isCore && !empty && (
+          <span
+            className="absolute left-1/2 -translate-x-1/2 inline-flex items-center justify-center rounded-full"
+            style={{
+              top: -13,
+              width: 22,
+              height: 22,
+              background: MOA_GOLD,
+              color: BG,
+              border: "2px solid #04100F",
+              boxShadow: "0 4px 10px -2px rgba(0,0,0,0.5)",
+            }}
+          >
+            <Crown style={{ width: 12, height: 12 }} />
+          </span>
+        )}
+        {!empty && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(seat);
+            }}
+            title="Remove"
+            className="absolute opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center rounded-full"
+            style={{
+              top: -9,
+              right: -9,
+              width: 18,
+              height: 18,
+              background: "rgba(252,165,165,0.95)",
+              color: "#3a0d0d",
+              border: "1px solid rgba(0,0,0,0.3)",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      <span
+        className="leading-tight text-center"
+        style={{
+          color: empty ? "rgba(255,230,203,0.4)" : CREAM,
+          fontFamily: '"Fraunces", serif',
+          fontSize: isCore ? 16 : 13,
+        }}
+      >
+        {o?.label ?? (droppable ? "drop or click" : "drag a model")}
+      </span>
+    </div>
+  );
+}
+
+// The council stage — core on top, three expert seats below, curved connectors
+// that flow once both ends are filled.
+function CouncilStage({
+  core,
+  experts,
+  maxExperts,
+  armed,
+  dragActive,
+  onPlace,
+  onDropKey,
+  onRemove,
+}: {
+  core: MoaModelOption | undefined;
+  experts: MoaModelOption[];
+  maxExperts: number;
+  armed: boolean;
+  dragActive: boolean;
+  onPlace: (seat: "core" | number) => void;
+  onDropKey: (seat: "core" | number, key: string) => void;
+  onRemove: (seat: "core" | number) => void;
+}) {
+  const slots = Array.from({ length: maxExperts }, (_, i) => experts[i]);
+  return (
+    <div
+      className="relative h-full flex flex-col items-center justify-start pt-6 pb-3 px-2"
+      style={{ minHeight: 280 }}
+    >
+      <CouncilSeat
+        seat="core"
+        o={core}
+        armed={armed}
+        dragActive={dragActive}
+        onPlace={onPlace}
+        onDropKey={onDropKey}
+        onRemove={onRemove}
+      />
+      <svg
+        viewBox="0 0 300 56"
+        preserveAspectRatio="none"
+        aria-hidden
+        style={{ width: "90%", maxWidth: 380, height: 50, margin: "16px 0 4px" }}
+      >
+        {[52, 150, 248].map((x, i) => {
+          const filled = !!core && !!experts[i];
+          return (
+            <path
+              key={i}
+              className={filled ? "ministry-connector" : ""}
+              d={`M150 2 C150 30 ${x} 24 ${x} 54`}
+              fill="none"
+              stroke={filled ? "rgba(255,230,203,0.75)" : "rgba(255,230,203,0.16)"}
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          );
+        })}
+      </svg>
+      <div className="flex items-start justify-center gap-4 sm:gap-6 w-full flex-wrap">
+        {slots.map((o, i) => (
+          <CouncilSeat
+            key={i}
+            seat={i}
+            o={o}
+            armed={armed}
+            dragActive={dragActive}
+            onPlace={onPlace}
+            onDropKey={onDropKey}
+            onRemove={onRemove}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Max tokens per call — a slider with a live quality-tradeoff explainer.
+function MaxTokensControl({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+}) {
+  const note =
+    value <= 4096
+      ? {
+          c: "#86efac",
+          t: "Sweet spot — references stay short & sharp, so the core gets clean signal (the HermesBench default).",
+        }
+      : value <= 8192
+        ? {
+            c: MOA_TEAL,
+            t: "Roomier — fine for a genuinely complex turn, but each reference gets wordier.",
+          }
+        : value <= 12288
+          ? {
+              c: "#fbbf24",
+              t: "Roomy — references start hedging & repeating and the core has more noise to wade through; quality often dips.",
+            }
+          : {
+              c: "#fca5a5",
+              t: "Max — references can write essays, which usually lowers MoA quality, and you're near GPT-5.5's ceiling.",
+            };
+  return (
+    <div
+      className="px-3 py-2.5"
+      style={{
+        borderRadius: 10,
+        border: "1px solid rgba(255,230,203,0.16)",
+        background: "rgba(255,255,255,0.015)",
+      }}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <span
+          className="hermes-mono text-[9px] uppercase tracking-[0.18em]"
+          style={{ color: "rgba(255,230,203,0.5)" }}
+        >
+          Max tokens / call
+        </span>
+        <span
+          className="hermes-mono text-[11px] tabular-nums"
+          style={{ color: CREAM }}
+        >
+          {value.toLocaleString()}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={2048}
+        max={16384}
+        step={1024}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full"
+        style={{ accentColor: MOA_TEAL }}
+      />
+      <div
+        className="text-[10.5px] leading-snug mt-1.5"
+        style={{ color: note.c, fontFamily: '"Fraunces", serif' }}
+      >
+        {note.t}
+      </div>
+      <div
+        className="hermes-mono text-[7.5px] uppercase tracking-[0.14em] mt-1.5"
+        style={{ color: "rgba(255,230,203,0.3)" }}
+      >
+        change it anytime · smaller usually = sharper MoA
+      </div>
+    </div>
+  );
+}
+
+// Direct write — saves the preset into ~/.hermes/config.yaml on THIS machine
+// (Mac & Windows, via the loopback backend), merged + backed up. No copy-paste.
+function MinistrySave({
+  core,
+  experts,
+  maxTokens,
+}: {
+  core: MoaModelOption | undefined;
+  experts: MoaModelOption[];
+  maxTokens: number;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const ready = !!core && experts.length > 0;
+  async function save() {
+    if (!ready || saving || !core) return;
+    setSaving(true);
+    setMsg(null);
+    try {
+      const token =
+        (
+          await fetch("/__token")
+            .then((r) => r.json())
+            .catch(() => null)
+        )?.token ?? "";
+      const r = await fetch("/__hermes_moa_save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-claude-os-token": token,
+        },
+        body: JSON.stringify({
+          name: "ministry",
+          reference_models: experts.map((e) => ({
+            provider: e.provider,
+            model: e.model,
+          })),
+          aggregator: { provider: core.provider, model: core.model },
+          reference_temperature: 0.6,
+          aggregator_temperature: 0.4,
+          max_tokens: maxTokens,
+          enabled: true,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) throw new Error(j?.error || `status ${r.status}`);
+      setMsg({
+        ok: true,
+        text: `✓ Saved “${j.name || "ministry"}” to ~/.hermes/config.yaml · old config backed up. Restart any open Hermes session, then run  /model ministry --provider moa`,
+      });
+    } catch (e: any) {
+      const m = String(e?.message ?? "save failed");
+      setMsg({
+        ok: false,
+        text: m.includes("config.yaml")
+          ? "No Hermes config on this machine — run `hermes setup` first."
+          : m,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        onClick={save}
+        disabled={!ready || saving}
+        className="hermes-mono text-[10px] uppercase tracking-[0.2em] px-3 py-2.5 transition-colors disabled:opacity-40"
+        style={{
+          borderRadius: 8,
+          background: ready ? MOA_TEAL : "transparent",
+          color: ready ? BG : "rgba(255,230,203,0.5)",
+          border: `1px solid ${MOA_TEAL}`,
+        }}
+      >
+        {saving
+          ? "Saving to this computer…"
+          : msg?.ok
+            ? "✓ Saved — re-save anytime"
+            : "⤓ Save to this computer"}
+      </button>
+      <div
+        className="hermes-mono text-[10px] leading-relaxed"
+        style={{
+          color: msg
+            ? msg.ok
+              ? "#86efac"
+              : "#fca5a5"
+            : "rgba(255,230,203,0.4)",
+          ...(msg
+            ? {
+                borderRadius: 6,
+                padding: "6px 8px",
+                background: msg.ok
+                  ? "rgba(134,239,172,0.08)"
+                  : "rgba(252,165,165,0.08)",
+                border: `1px solid ${
+                  msg.ok ? "rgba(134,239,172,0.28)" : "rgba(252,165,165,0.28)"
+                }`,
+              }
+            : {}),
+        }}
+      >
+        {msg
+          ? msg.text
+          : "writes the preset into Hermes' config (Mac & Windows) — no copy-paste, backed up first"}
+      </div>
+    </div>
+  );
+}
+
+// Copy block — the manual fallback (paste the prompt to Hermes yourself).
+function MinistryCopy({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    void copyToClipboard(text).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <div
+      className="border"
+      style={{ borderColor: "rgba(255,230,203,0.2)", background: CODE_BG }}
+    >
+      <div
+        className="flex items-center justify-between px-3 py-1.5 border-b"
+        style={{ borderColor: "rgba(255,230,203,0.1)" }}
+      >
+        <span
+          className="hermes-mono text-[9px] uppercase tracking-[0.22em] flex items-center gap-2"
+          style={{ color: "rgba(255,230,203,0.6)" }}
+        >
+          <img
+            src={hermesPortrait}
+            alt=""
+            className="object-cover rounded-full"
+            style={{
+              width: 22,
+              height: 22,
+              border: "1px solid rgba(255,230,203,0.4)",
+            }}
+          />
+          Copy for Hermes
+        </span>
+        <button
+          type="button"
+          onClick={copy}
+          className="hermes-mono text-[9px] uppercase tracking-[0.2em] px-2.5 py-1 border transition-colors"
+          style={{
+            color: copied ? "#86efac" : BG,
+            background: copied ? "transparent" : MOA_TEAL,
+            borderColor: copied ? "rgba(134,239,172,0.6)" : MOA_TEAL,
+          }}
+        >
+          {copied ? "✓ Copied" : "Copy"}
+        </button>
+      </div>
+      <pre
+        className="hermes-mono text-[10.5px] leading-relaxed p-3 overflow-y-auto whitespace-pre-wrap"
+        style={{ color: "rgba(255,230,203,0.85)", maxHeight: 150 }}
+      >
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+function MinistryCard() {
+  const [open, setOpen] = useState(false);
+  const options = useMemo<MoaModelOption[]>(() => {
+    const list =
+      (modelIntel as unknown as { models?: Array<Record<string, any>> }).models ??
+      [];
+    return list
+      .filter(
+        (x) =>
+          x.openrouterId &&
+          x.price &&
+          typeof x.price.inputPerM === "number" &&
+          typeof x.price.outputPerM === "number" &&
+          x.status !== "retired" &&
+          x.id !== "claude-opus-4-7", // superseded by Opus 4.8
+      )
+      .map((x) => {
+        // Provider-aware routing (a single moa preset can mix providers).
+        // OpenAI models route through the user's ChatGPT subscription
+        // (openai-codex) → $0-marginal "sub" reference. The codex provider
+        // takes the bare model id (gpt-5.5), not the openrouter "openai/…"
+        // slug. Everything else routes via OpenRouter (one key, cheap opens).
+        const orId = String(x.openrouterId);
+        const isOpenAI = String(x.vendorKey) === "openai";
+        return {
+          key: String(x.id),
+          label: String(x.name),
+          vendorKey: String(x.vendorKey),
+          provider: isOpenAI ? "openai-codex" : "openrouter",
+          model: isOpenAI ? orId.split("/").slice(1).join("/") : orId,
+          sub: isOpenAI,
+          tier: String(x.tier ?? ""),
+          inPerM: x.price.inputPerM as number,
+          outPerM: x.price.outputPerM as number,
+          intelligence:
+            typeof x.benchmarks?.aaIndex === "number"
+              ? (x.benchmarks.aaIndex as number)
+              : undefined,
+          arenaElo:
+            typeof x.benchmarks?.lmarenaElo === "number"
+              ? (x.benchmarks.lmarenaElo as number)
+              : undefined,
+          speedTps:
+            typeof x.speedTps === "number" ? (x.speedTps as number) : undefined,
+          context:
+            typeof x.context === "number" ? (x.context as number) : undefined,
+        };
+      });
+  }, []);
+  const byKey = useMemo(
+    () =>
+      Object.fromEntries(options.map((o) => [o.key, o])) as Record<
+        string,
+        MoaModelOption
+      >,
+    [options],
+  );
+
+  const [coreKey, setCoreKey] = useState("claude-opus-4-8");
+  const [expertKeys, setExpertKeys] = useState<string[]>([
+    "gpt-5-5",
+    "glm-5-2",
+    "deepseek-v4-pro",
+  ]);
+  const MAX_EXPERTS = 3;
+
+  const core = byKey[coreKey];
+  const experts = expertKeys
+    .map((k) => byKey[k])
+    .filter(Boolean) as MoaModelOption[];
+
+  // Drag-and-drop / click-to-place state. One model can be "armed" (picked by
+  // click) and then placed on a seat; or dragged straight onto a seat.
+  const [armedKey, setArmedKey] = useState<string | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+
+  function assignSeat(seat: "core" | number, k: string) {
+    if (seat === "core") setCoreModel(k);
+    else setExpertSlot(seat, k);
+  }
+  function dropOnSeat(seat: "core" | number, k: string) {
+    assignSeat(seat, k);
+    setArmedKey(null);
+    setDragKey(null);
+  }
+  function placeArmed(seat: "core" | number) {
+    if (!armedKey) return;
+    assignSeat(seat, armedKey);
+    setArmedKey(null);
+  }
+  function removeSeat(seat: "core" | number) {
+    if (seat === "core") setCoreKey("");
+    else removeExpertSlot(seat);
+  }
+  function armBench(k: string) {
+    setArmedKey((cur) => (cur === k ? null : k));
+  }
+
+  function toggleExpert(k: string) {
+    if (k === coreKey) return; // a model can't be both core and expert
+    setExpertKeys((cur) => {
+      if (cur.includes(k)) return cur.filter((x) => x !== k);
+      if (cur.length >= MAX_EXPERTS) return cur;
+      return [...cur, k];
+    });
+  }
+
+  // Make a model the orchestrator (core); drop it from experts if it was one.
+  function setCoreModel(k: string) {
+    setCoreKey(k);
+    setExpertKeys((cur) => cur.filter((x) => x !== k));
+  }
+
+  function resetRecommended() {
+    setCoreKey("claude-opus-4-8");
+    setExpertKeys(["gpt-5-5", "glm-5-2", "deepseek-v4-pro"]);
+  }
+
+  // Set/replace expert slot i (append when it's a fresh empty slot); no dupes.
+  function setExpertSlot(i: number, k: string) {
+    setExpertKeys((cur) => {
+      if (cur.includes(k)) return cur;
+      const next = [...cur];
+      if (i < next.length) next[i] = k;
+      else if (next.length < MAX_EXPERTS) next.push(k);
+      return next;
+    });
+  }
+  function removeExpertSlot(i: number) {
+    setExpertKeys((cur) => cur.filter((_, idx) => idx !== i));
+  }
+
+  const { data: live } = useOpenRouterPrices();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (open)
+      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [open]);
+  useEffect(() => {
+    if (!armedKey) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setArmedKey(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [armedKey]);
+
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"arena" | "cost" | "speed">("arena");
+
+  const paletteModels = useMemo(() => {
+    const arr = [...options];
+    if (sortBy === "cost")
+      arr.sort(
+        (a, b) =>
+          (ministryRate(a, live).outPerM || 0) -
+          (ministryRate(b, live).outPerM || 0),
+      );
+    else if (sortBy === "speed")
+      arr.sort((a, b) => (b.speedTps ?? 0) - (a.speedTps ?? 0));
+    else arr.sort((a, b) => ministryPower(b) - ministryPower(a));
+    return arr;
+  }, [options, sortBy, live]);
+
+  const focusModel = (focusKey && byKey[focusKey]) || core || experts[0];
+
+  // Esc clears an armed (click-to-place) selection.
+  useEffect(() => {
+    if (!armedKey) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setArmedKey(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [armedKey]);
+
+  const [maxTokens, setMaxTokens] = useState(4096);
+  const prompt = ministryPrompt(core, experts, maxTokens);
+
+  // ── Closed: a gold persona card (first in the Pantheon grid) ──
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="group relative border overflow-hidden flex flex-col transition-all text-left w-full"
+        style={{
+          borderColor: "rgba(255,210,30,0.7)",
+          background: "rgba(0,0,0,0.32)",
+          boxShadow: "0 0 24px rgba(255,210,30,0.1)",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#FFD21E")}
+        onMouseLeave={(e) =>
+          (e.currentTarget.style.borderColor = "rgba(255,210,30,0.7)")
+        }
+        title="Assemble the Ministry of Experts"
+      >
+        <div className="aspect-square relative overflow-hidden">
+          <img
+            src={ministryHero}
+            alt="Ministry of Experts"
+            className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            style={{ transform: "scale(1.08)" }}
+            loading="lazy"
+          />
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(7,29,28,0) 35%, rgba(7,29,28,0.7) 100%), radial-gradient(ellipse at 50% 38%, rgba(255,210,30,0.14), transparent 70%)",
+            }}
+          />
+          <div
+            aria-hidden
+            className="absolute inset-2 pointer-events-none"
+            style={{ border: "1px solid rgba(255,210,30,0.5)" }}
+          />
+          <span
+            className="hermes-mono absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-1 border text-[8.5px] uppercase tracking-[0.22em]"
+            style={{
+              background: "rgba(7,29,28,0.85)",
+              color: "#FFD21E",
+              borderColor: "rgba(255,210,30,0.7)",
+            }}
+          >
+            ✦ Ensemble
+          </span>
+          <div className="absolute bottom-2 left-2 flex items-center gap-1.5">
+            {experts.slice(0, 3).map((e) => (
+              <span
+                key={e.key}
+                className="inline-flex items-center justify-center"
+                style={{
+                  width: 22,
+                  height: 22,
+                  background: "rgba(7,29,28,0.85)",
+                  border: "1px solid rgba(255,210,30,0.5)",
+                }}
+              >
+                <VendorLogo vendorKey={e.vendorKey} size={14} />
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="p-4 flex flex-col gap-1.5">
+          <h3
+            className="hermes-display uppercase leading-none truncate"
+            style={{ color: CREAM, fontSize: "20px", letterSpacing: "0.04em" }}
+          >
+            Ministry of Experts
+          </h3>
+          <p
+            className="text-[13.5px] leading-snug line-clamp-2"
+            style={{
+              color: "rgba(255,230,203,0.78)",
+              fontFamily: '"Fraunces", serif',
+            }}
+          >
+            A council of models that answers as one. Tap to assemble — a core
+            model + up to three experts.
+          </p>
+          <span
+            className="hermes-mono text-[10px] uppercase tracking-[0.18em] px-1.5 py-1 border inline-flex items-center gap-1.5 mt-1 self-start"
+            style={{
+              color: "#FFD21E",
+              borderColor: "rgba(255,210,30,0.55)",
+              background: "rgba(255,210,30,0.06)",
+            }}
+          >
+            mixture of agents · moa
+          </span>
+        </div>
+      </button>
+    );
+  }
+
+  // ── Open: the council builder — palette · council · stats+copy ──
+  return (
+    <div
+      ref={panelRef}
+      className="col-span-full border p-5 md:p-6"
+      style={{
+        borderColor: "rgba(255,230,203,0.22)",
+        background:
+          "linear-gradient(180deg, rgba(255,230,203,0.04), rgba(0,0,0,0.12))",
+      }}
+    >
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <img
+            src={ministryHero}
+            alt="Ministry of Experts"
+            className="object-cover shrink-0"
+            style={{
+              width: 46,
+              height: 46,
+              border: "1px solid rgba(255,230,203,0.3)",
+            }}
+          />
+          <div className="min-w-0">
+            <div
+              className="hermes-mono text-[9px] uppercase tracking-[0.28em]"
+              style={{ color: "rgba(255,230,203,0.6)" }}
+            >
+              <span style={{ color: MOA_GOLD }}>✦</span> Pantheon · the ensemble
+            </div>
+            <h3
+              className="hermes-display uppercase leading-none"
+              style={{ color: CREAM, fontSize: "22px", letterSpacing: "0.03em" }}
+            >
+              Ministry of Experts
+            </h3>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={resetRecommended}
+            title="Reset to the default line-up (Opus 4.8 · GPT-5.5 · GLM 5.2 · DeepSeek V4 Pro)"
+            className="hermes-mono text-[9px] uppercase tracking-[0.2em] px-2.5 py-1.5 border transition-colors"
+            style={{
+              color: MOA_TEAL,
+              borderColor: "rgba(255,230,203,0.4)",
+              background: "rgba(255,230,203,0.06)",
+            }}
+          >
+            ↺ Use default
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="hermes-mono text-[10px] uppercase tracking-[0.2em] px-2.5 py-1.5 border"
+            style={{
+              color: CREAM,
+              borderColor: "rgba(255,230,203,0.3)",
+              background: "rgba(255,230,203,0.04)",
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-[0.82fr_1.18fr] gap-5 items-start">
+        {/* LEFT — the bench + analytics underneath */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div
+                className="hermes-mono text-[10px] uppercase tracking-[0.22em]"
+                style={{ color: CREAM }}
+              >
+                The Bench
+              </div>
+              <div
+                className="hermes-mono text-[8px] mt-0.5 truncate"
+                style={{ color: armedKey ? MOA_GOLD : "rgba(255,230,203,0.4)" }}
+              >
+                {armedKey
+                  ? `→ click a seat to place ${byKey[armedKey]?.label ?? "it"} · Esc cancels`
+                  : "drag a model onto a seat — or click it, then a seat"}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {(["arena", "cost", "speed"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setSortBy(k)}
+                  title={`Rank by ${k}`}
+                  className="hermes-mono text-[7.5px] uppercase tracking-[0.1em] px-1.5 py-0.5 transition-colors"
+                  style={{
+                    borderRadius: 5,
+                    color: sortBy === k ? BG : "rgba(255,230,203,0.5)",
+                    background: sortBy === k ? MOA_TEAL : "transparent",
+                    border: `1px solid ${sortBy === k ? MOA_TEAL : "rgba(255,230,203,0.18)"}`,
+                  }}
+                >
+                  {k}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div
+            className="grid grid-cols-3 gap-1.5"
+            onMouseLeave={() => setFocusKey(null)}
+          >
+            {paletteModels.map((o) => {
+              const expIdx = expertKeys.indexOf(o.key);
+              const role: "core" | "expert" | null =
+                o.key === coreKey ? "core" : expIdx >= 0 ? "expert" : null;
+              return (
+                <PaletteModelBox
+                  key={o.key}
+                  o={o}
+                  role={role}
+                  index={expIdx}
+                  armed={armedKey === o.key}
+                  sortBy={sortBy}
+                  onArm={armBench}
+                  onDragKey={setDragKey}
+                  onFocus={setFocusKey}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* RIGHT — the council (lifted) */}
+        <div className="flex flex-col gap-3">
+          <div
+            className="relative overflow-hidden flex items-start justify-center"
+            style={{
+              minHeight: 300,
+              background:
+                "radial-gradient(120% 80% at 50% -8%, #0E3330 0%, #071D1C 42%, #04100F 100%)",
+            }}
+          >
+            <img
+              src={ministryHero}
+              alt=""
+              aria-hidden
+              className="absolute inset-x-0 top-0 w-full object-cover"
+              style={{
+                height: "80%",
+                opacity: 0.16,
+                mixBlendMode: "soft-light",
+                filter: "saturate(0.7)",
+              }}
+            />
+            <div
+              aria-hidden
+              className="absolute inset-0"
+              style={{
+                background:
+                  "radial-gradient(120% 95% at 50% 38%, transparent 48%, rgba(4,16,15,0.74) 100%)",
+              }}
+            />
+            <div className="relative w-full">
+              <CouncilStage
+                core={core}
+                experts={experts}
+                maxExperts={MAX_EXPERTS}
+                armed={armedKey != null}
+                dragActive={dragKey != null}
+                onPlace={placeArmed}
+                onDropKey={dropOnSeat}
+                onRemove={removeSeat}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* BOTTOM — analytics (≈ first 2 bench columns) + the prompt, aligned. */}
+      <div className="grid lg:grid-cols-[0.82fr_1.18fr] gap-5 mt-4 items-start">
+        <div className="grid grid-cols-3 gap-1.5">
+          <div className="col-span-2">
+            <MinistryAnalytics
+              model={focusModel}
+              lineup={[core, ...experts].filter(Boolean) as MoaModelOption[]}
+              live={live}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <MaxTokensControl value={maxTokens} onChange={setMaxTokens} />
+          <MinistrySave core={core} experts={experts} maxTokens={maxTokens} />
+          <MinistryCopy text={prompt} />
+        </div>
+      </div>
+    </div>
   );
 }
 

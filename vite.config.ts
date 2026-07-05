@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
+import yaml from "js-yaml";
 
 // ── Cross-platform binary resolution (Windows support) ──
 // The Hermes page probes for the hermes / graphify CLIs and a venv Python. On
@@ -327,6 +328,105 @@ export default defineConfig({
       {
         name: "claude-os-live-data",
         configureServer(server) {
+          // POST /__hermes_moa_save — write a Mixture-of-Agents preset into
+          // ~/.hermes/config.yaml. Merges (never clobbers other presets / keys)
+          // and timestamp-backs-up the file first. Loopback + per-run token gated.
+          server.middlewares.use("/__hermes_moa_save", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "loopback only" }));
+              return;
+            }
+            if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "bad token" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => (body += c));
+            req.on("end", () => {
+              try {
+                const data = JSON.parse(body || "{}");
+                const name =
+                  String(data.name || "").trim().replace(/[^a-zA-Z0-9_-]/g, "-") ||
+                  "ministry";
+                const refs = Array.isArray(data.reference_models)
+                  ? data.reference_models
+                  : [];
+                const agg = data.aggregator;
+                if (!refs.length || !agg?.provider || !agg?.model) {
+                  res.statusCode = 400;
+                  res.end(
+                    JSON.stringify({ error: "need >=1 reference and an aggregator" }),
+                  );
+                  return;
+                }
+                const configPath = join(homedir(), ".hermes", "config.yaml");
+                if (!existsSync(configPath)) {
+                  res.statusCode = 404;
+                  res.end(
+                    JSON.stringify({
+                      error: "no ~/.hermes/config.yaml — run `hermes setup` first",
+                    }),
+                  );
+                  return;
+                }
+                const text = readFileSync(configPath, "utf-8");
+                const cfg = (yaml.load(text) as Record<string, any>) || {};
+                // backup before any write
+                const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+                const backupPath = `${configPath}.bak.${stamp}`;
+                writeFileSync(backupPath, text);
+                // merge — keep any other presets / moa keys / config untouched
+                cfg.moa =
+                  cfg.moa && typeof cfg.moa === "object" ? cfg.moa : {};
+                cfg.moa.presets =
+                  cfg.moa.presets && typeof cfg.moa.presets === "object"
+                    ? cfg.moa.presets
+                    : {};
+                cfg.moa.presets[name] = {
+                  reference_models: refs.map((r: any) => ({
+                    provider: String(r.provider),
+                    model: String(r.model),
+                  })),
+                  aggregator: {
+                    provider: String(agg.provider),
+                    model: String(agg.model),
+                  },
+                  reference_temperature:
+                    typeof data.reference_temperature === "number"
+                      ? data.reference_temperature
+                      : 0.6,
+                  aggregator_temperature:
+                    typeof data.aggregator_temperature === "number"
+                      ? data.aggregator_temperature
+                      : 0.4,
+                  max_tokens:
+                    typeof data.max_tokens === "number" ? data.max_tokens : 4096,
+                  enabled: true,
+                };
+                cfg.moa.default_preset = name;
+                writeFileSync(
+                  configPath,
+                  yaml.dump(cfg, { lineWidth: 120, noRefs: true }),
+                );
+                res.end(
+                  JSON.stringify({
+                    ok: true,
+                    name,
+                    backup: backupPath,
+                    presets: Object.keys(cfg.moa.presets),
+                  }),
+                );
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: err?.message ?? "save failed" }));
+              }
+            });
+          });
+
           // GET /__live-data — serves live-data.json fresh from disk on every
           // request.  This replaces the static `import liveData from "…"`
           // pattern so the browser always gets the latest aggregator output
@@ -1022,7 +1122,7 @@ export default defineConfig({
             }
             let body = "";
             for await (const chunk of req as any) body += chunk;
-            let payload: { prompt?: string; sessionId?: string; toolsets?: string; yolo?: boolean; graph?: boolean };
+            let payload: { prompt?: string; sessionId?: string; toolsets?: string; yolo?: boolean; graph?: boolean; model?: string; provider?: string };
             try {
               payload = JSON.parse(body || "{}");
             } catch {
@@ -1070,6 +1170,25 @@ export default defineConfig({
             // graphify skill is only for the Knowledge-Graph chat; decoupled from
             // yolo so voice/other callers can auto-approve tools WITHOUT it.
             const graph = payload.graph === true;
+            // Optional per-chat model override → `hermes chat -m <model> --provider <p>`.
+            // Lets the composer's model selector pick a model (or a Mixture-of-
+            // Agents preset via provider "moa") for THIS turn without touching the
+            // persistent default in config.yaml. Both validated to safe charsets so
+            // they can't escape to argv. Model ids carry "/" ":" "." (e.g. an
+            // OpenRouter id like "z-ai/glm-5.2"); provider is a bare word (a
+            // built-in or a user-defined providers: entry, including "moa").
+            const model = typeof payload.model === "string" ? payload.model.trim() : "";
+            if (model && !/^[A-Za-z0-9][A-Za-z0-9_.\/:-]{0,119}$/.test(model)) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "invalid model" }));
+              return;
+            }
+            const provider = typeof payload.provider === "string" ? payload.provider.trim() : "";
+            if (provider && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/.test(provider)) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "invalid provider" }));
+              return;
+            }
 
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-store");
@@ -1140,6 +1259,8 @@ export default defineConfig({
             // Hermes actually queries the graph without the approval deadlock.
             if (yolo) args.push("--yolo");
             if (graph) args.push("-s", "graphify");
+            if (model) args.push("-m", model);
+            if (provider) args.push("--provider", provider);
             // Strip any inherited PYTHONPATH/PYTHONHOME so the venv's own
             // site-packages resolution wins. Inherited values from a parent
             // shell can shadow Hermes' bundled deps and cause silent imports
@@ -2434,7 +2555,7 @@ export default defineConfig({
               return;
             }
             // Default from config.yaml
-            let defaultModel: { provider: string; name: string } | null = null;
+            let defaultModel: { provider: string; name: string; context?: number } | null = null;
             try {
               const cfgPath = join(homedir(), ".hermes", "config.yaml");
               if (existsSync(cfgPath)) {
@@ -2446,7 +2567,15 @@ export default defineConfig({
                   const provider = block
                     .match(/^\s+provider:\s*["']?([^"'\n]+)/m)?.[1]
                     ?.trim();
-                  if (name) defaultModel = { provider: provider ?? "openai", name };
+                  const ctxRaw = block
+                    .match(/^\s+context_length:\s*([0-9_]+)/m)?.[1]
+                    ?.replace(/_/g, "");
+                  if (name)
+                    defaultModel = {
+                      provider: provider ?? "openai",
+                      name,
+                      ...(ctxRaw ? { context: Number(ctxRaw) } : {}),
+                    };
                 }
               }
             } catch {
@@ -2473,6 +2602,7 @@ export default defineConfig({
               {
                 provider: "anthropic",
                 models: [
+                  { name: "claude-fable-5", tier: "top" },
                   { name: "claude-opus-4.8", tier: "top" },
                   { name: "claude-sonnet-4.6", tier: "mid" },
                   { name: "claude-haiku-4.5", tier: "cheap" },
@@ -2487,12 +2617,52 @@ export default defineConfig({
                 ],
               },
               {
+                // OpenRouter is the universal router — these are the current
+                // best, verified against the live OpenRouter catalog (2026-06).
                 provider: "openrouter",
                 models: [
-                  { name: "deepseek/deepseek-v4", tier: "top" },
-                  { name: "z-ai/glm-5.1", tier: "mid" },
-                  { name: "minimaxai/minimax-m3", tier: "mid" },
+                  { name: "z-ai/glm-5.2", tier: "top" }, // best GLM — 1M ctx
+                  { name: "anthropic/claude-opus-4.8", tier: "top" },
+                  { name: "anthropic/claude-sonnet-5", tier: "top" }, // launched 2026-06-30 · 1M ctx · $2/$10
+                  { name: "openai/gpt-5.5", tier: "top" },
+                  { name: "deepseek/deepseek-v4-pro", tier: "top" },
+                  { name: "x-ai/grok-4.3", tier: "mid" },
+                  { name: "google/gemini-3.5-flash", tier: "mid" },
+                  { name: "minimax/minimax-m3", tier: "mid" },
+                  { name: "qwen/qwen3.7-plus", tier: "mid" },
+                  { name: "moonshotai/kimi-k2.6", tier: "mid" },
+                  { name: "deepseek/deepseek-v4-flash", tier: "cheap" },
+                  { name: "z-ai/glm-4.7-flash", tier: "cheap" },
                   { name: "meta-llama/llama-3.3-70b-instruct:free", tier: "free" },
+                ],
+              },
+              // OAuth / subscription providers — only surface when the user has
+              // them configured (so it's zero marginal cost on an existing plan,
+              // e.g. GPT-5.5 on a ChatGPT sub, Grok on an X sub).
+              {
+                provider: "openai-codex",
+                models: [
+                  { name: "gpt-5.5", tier: "top" },
+                  { name: "gpt-5.5-pro", tier: "top" },
+                  { name: "gpt-5.3-codex", tier: "mid" },
+                ],
+              },
+              {
+                provider: "xai-oauth",
+                models: [
+                  { name: "grok-4.3", tier: "top" },
+                  { name: "grok-4", tier: "mid" },
+                ],
+              },
+              {
+                provider: "minimax",
+                models: [{ name: "minimax-m3", tier: "top" }],
+              },
+              {
+                provider: "sakana",
+                models: [
+                  { name: "fugu-ultra", tier: "top" },
+                  { name: "fugu", tier: "mid" },
                 ],
               },
               {
@@ -2530,9 +2700,249 @@ export default defineConfig({
                 ],
               },
             ];
+            // Surface the user's Mixture-of-Agents presets so the chat's model
+            // selector can offer them as first-class "blends" — selecting one
+            // runs `hermes chat -m <preset> --provider moa`. Read from the same
+            // config.yaml; fail soft if it's absent or malformed.
+            let mixtures: Array<{ name: string; references: number; aggregator?: string }> = [];
+            try {
+              const cfgPath2 = join(homedir(), ".hermes", "config.yaml");
+              if (existsSync(cfgPath2)) {
+                const cfg = yaml.load(readFileSync(cfgPath2, "utf-8")) as any;
+                const presets = cfg?.moa?.presets;
+                if (presets && typeof presets === "object") {
+                  mixtures = Object.entries(presets).map(
+                    ([name, p]: [string, any]) => ({
+                      name,
+                      references: Array.isArray(p?.reference_models)
+                        ? p.reference_models.length
+                        : 0,
+                      aggregator: p?.aggregator?.model
+                        ? String(p.aggregator.model)
+                        : undefined,
+                    }),
+                  );
+                }
+              }
+            } catch {
+              /* no MoA presets — fine */
+            }
+            // Which providers does the user ACTUALLY have credentials for? The
+            // model picker hides catalog groups for unconfigured providers, so a
+            // pick can never fail with "Unknown provider 'x'". Sources: the
+            // configured default, auth.json OAuth providers, ~/.hermes/.env
+            // API-key vars, and any custom providers in config.yaml. (If none are
+            // detected, the UI falls back to showing everything.)
+            const configured = new Set<string>();
+            if (defaultModel?.provider) configured.add(defaultModel.provider.toLowerCase());
+            try {
+              const authPath = join(homedir(), ".hermes", "auth.json");
+              if (existsSync(authPath)) {
+                const j = JSON.parse(readFileSync(authPath, "utf-8"));
+                for (const k of Object.keys(j?.providers ?? {})) configured.add(k.toLowerCase());
+              }
+            } catch {
+              /* ignore */
+            }
+            try {
+              const envPath = join(homedir(), ".hermes", ".env");
+              if (existsSync(envPath)) {
+                const env = readFileSync(envPath, "utf-8");
+                const ENV_MAP: Record<string, string> = {
+                  OPENROUTER_API_KEY: "openrouter",
+                  OPENAI_API_KEY: "openai",
+                  ANTHROPIC_API_KEY: "anthropic",
+                  GEMINI_API_KEY: "googlegemini",
+                  GOOGLE_API_KEY: "googlegemini",
+                  GOOGLEAI_API_KEY: "googlegemini",
+                  XAI_API_KEY: "xai",
+                  GROK_API_KEY: "xai",
+                  MISTRAL_API_KEY: "mistral",
+                  GROQ_API_KEY: "groq",
+                  COHERE_API_KEY: "cohere",
+                  DEEPSEEK_API_KEY: "deepseek",
+                  MINIMAX_API_KEY: "minimax",
+                  NVIDIA_API_KEY: "nvidia",
+                };
+                for (const [varName, prov] of Object.entries(ENV_MAP)) {
+                  if (new RegExp(`^\\s*${varName}\\s*=\\s*\\S`, "m").test(env)) {
+                    configured.add(prov);
+                  }
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+            try {
+              const cfg = yaml.load(
+                readFileSync(join(homedir(), ".hermes", "config.yaml"), "utf-8"),
+              ) as any;
+              for (const k of Object.keys(cfg?.providers ?? {})) configured.add(k.toLowerCase());
+            } catch {
+              /* ignore */
+            }
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Cache-Control", "no-store");
-            res.end(JSON.stringify({ default: defaultModel, catalog }));
+            res.end(
+              JSON.stringify({
+                default: defaultModel,
+                catalog,
+                mixtures,
+                configured: Array.from(configured),
+              }),
+            );
+          });
+
+          // POST /__hermes_cmd — run a DETERMINISTIC, whitelisted Hermes
+          // sub-command (NO model call) and return sanitized output. Powers the
+          // chat's "commands" strip (Insights / Status / Version) — the real,
+          // non-hallucinated equivalents of the interactive slash commands
+          // (which can't run through `hermes chat -Q -q`). Only a fixed
+          // allow-list runs; never user-supplied argv. Loopback + token gated.
+          // Output is sanitized (home path → ~, API-key fragments masked, ANSI
+          // stripped) so nothing sensitive lands on screen / in a screen-record.
+          server.middlewares.use("/__hermes_cmd", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "loopback only" }));
+              return;
+            }
+            if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "bad token" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => (body += c));
+            req.on("end", () => {
+              let cmd = "";
+              try {
+                cmd = String(JSON.parse(body || "{}").cmd || "");
+              } catch {
+                cmd = "";
+              }
+              const ALLOW: Record<string, { args: string[]; timeout: number }> = {
+                version: { args: ["version"], timeout: 20_000 },
+                status: { args: ["status"], timeout: 25_000 },
+                insights: { args: ["insights", "--days", "30"], timeout: 30_000 },
+                doctor: { args: ["doctor"], timeout: 60_000 },
+                // Mutating: pulls latest + reinstalls deps. Auto-confirm (the
+                // user clicked it) and let Hermes keep its default backup.
+                update: { args: ["update", "--yes"], timeout: 300_000 },
+              };
+              const entry = ALLOW[cmd];
+              if (!entry) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: "unknown command" }));
+                return;
+              }
+              const verbArgs = entry.args;
+              const home = homedir();
+              const hermesRoot = join(home, ".hermes", "hermes-agent");
+              const hermesPython = venvBin(join(hermesRoot, "venv"), "python");
+              const hermesMain = join(hermesRoot, "hermes_cli", "main.py");
+              const useSrc = existsSync(hermesPython) && existsSync(hermesMain);
+              const binPath = useSrc ? hermesPython : resolveCliBin("hermes");
+              if (!binPath) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: "hermes binary not found" }));
+                return;
+              }
+              const args = useSrc ? [hermesMain, ...verbArgs] : [...verbArgs];
+              const env: NodeJS.ProcessEnv = {
+                ...process.env,
+                PYTHONUNBUFFERED: "1",
+                NO_COLOR: "1",
+                TERM: "dumb",
+              };
+              delete env.PYTHONPATH;
+              delete env.PYTHONHOME;
+              let out = "";
+              let done = false;
+              let timedOut = false;
+              const child = spawn(binPath, args, { cwd: home, env });
+              const killer = setTimeout(() => {
+                timedOut = true;
+                try {
+                  child.kill("SIGKILL");
+                } catch {
+                  /* already gone */
+                }
+              }, entry.timeout);
+              child.stdout.on("data", (b: Buffer) => (out += b.toString("utf-8")));
+              child.stderr.on("data", (b: Buffer) => (out += b.toString("utf-8")));
+              child.on("error", (e) => {
+                if (done) return;
+                done = true;
+                clearTimeout(killer);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: String((e as any)?.message || e) }));
+              });
+              child.on("close", (code) => {
+                if (done) return;
+                done = true;
+                clearTimeout(killer);
+                if (timedOut) {
+                  // A killed command (esp. `update --yes`) must NOT report success
+                  // with partial output — the install may be half-applied.
+                  res.statusCode = 504;
+                  res.end(
+                    JSON.stringify({
+                      error: `hermes ${cmd} timed out after ${Math.round(
+                        entry.timeout / 1000,
+                      )}s and was stopped${
+                        cmd === "update"
+                          ? " — the update may be partially applied; finish it from a terminal with `hermes update`"
+                          : ""
+                      }.`,
+                    }),
+                  );
+                  return;
+                }
+                // Redact-by-default: these outputs surface real account state and
+                // may be screen-recorded, so strip anything credential- or
+                // identity-shaped rather than denylisting one key prefix.
+                const realHome = (() => {
+                  try {
+                    return realpathSync(home);
+                  } catch {
+                    return home;
+                  }
+                })();
+                const clean = out
+                  .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "") // strip ANSI / CSI sequences
+                  .split(home)
+                  .join("~")
+                  .split(realHome)
+                  .join("~") // symlink-resolved home → ~ too
+                  // messaging / account identifiers, e.g. "(home: 7058871166)"
+                  .replace(/\((home|chat|id|user|channel|account)\s*:\s*[^)]+\)/gi, "($1: •••)")
+                  // explicit credential pairs: api_key/token/secret/password/bearer = <value>
+                  .replace(
+                    /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|token|bearer)\b(\s*[:=]\s*)["']?[^\s"'\n]{4,}/gi,
+                    "$1$2••••",
+                  )
+                  // a "✓ <token-ish>" value (anything but a status word) → configured
+                  .replace(
+                    /(✓\s+)(?!configured|exists|logged|enabled|active|valid|ready|installed|running|set\b|on\b|yes\b|ok\b)[A-Za-z0-9][A-Za-z0-9._-]{3,}(\.\.\.[A-Za-z0-9]+)?/gi,
+                    "$1configured",
+                  )
+                  // known token shapes anywhere (OpenAI, Slack, GitHub, Google, JWT…)
+                  .replace(
+                    /\b(sk-[a-z]+-|sk-|xox[bapr]-|gh[pousr]_|AIza|ya29\.|eyJ)[A-Za-z0-9._\-/+]{4,}/g,
+                    "••••",
+                  )
+                  .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "<email>")
+                  // long opaque token runs (base64 / hex / JWT segments)
+                  .replace(/\b[A-Za-z0-9_-]{28,}\b/g, "••••")
+                  .trimEnd();
+                res.end(
+                  JSON.stringify({ ok: true, cmd, output: clean || "(no output)", code }),
+                );
+              });
+            });
           });
 
           // GET /__hermes_pantheon_sync — per-persona git sync status.

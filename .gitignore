@@ -40,6 +40,9 @@ claude-os
 
 # graphify scratch output (regenerated on ingest)
 graphify-out/
+# per-project knowledge graph generated locally by graphify ingest — machine
+# data, regenerated on demand (index.json + power-design.json stay tracked).
+src/data/graphs/claude-os.json
 
 # Stray installer download, not source
 Claude Code OS (2.8.1) (1).zip
