@@ -5,6 +5,88 @@ versions are kept as zipped artefacts locally for rollback.
 
 ---
 
+## V2.12 — 06 Jul 2026
+
+Voice reliability + key retention. (The memory-recall / Brain features are
+being finalised separately and are **not** in this build.)
+
+### Fixed — the voice key is retained
+
+- Enter your OpenAI key once and it's saved to `~/.hermes/.env` and reused
+  across every browser, port and dev-server restart — no more re-prompting.
+- The voice engine now always boots from the saved key before opening a
+  call, so a saved key can never fall back to the setup card by mistake.
+
+### Also in this build
+
+- Voice can navigate the dashboard ("take me to memory"), pause the mic
+  mid-call, and shows an "apps used" row under each answer.
+
+---
+
+## V2.11 — 05 Jul 2026
+
+The **Ministry + Fable 5** release — Claude's newest flagship lands across the
+OS, the chat can actually run long agentic work without dying, and the Mixture
+-of-Agents "Ministry of Experts" is reliable end-to-end.
+
+### New — Claude Fable 5 everywhere
+
+- **Fable 5 in the model picker, the Ministry roster, and the model-intel
+  knowledge base** — routed through OpenRouter (`anthropic/claude-fable-5`, 1M
+  context) so it works on your OpenRouter key. Verified facts: #1 on the
+  Artificial Analysis Intelligence Index (64.9), $10/$50 per M, ~72 tps.
+- **Effort dial** — a per-model reasoning-effort control (minimal → xhigh) in
+  the chat composer, the persona editor, and the Add-Persona wizard. It adapts
+  its levels to the selected model and hides for models with no effort knob;
+  the composer dial writes Hermes' global `agent.reasoning_effort`.
+- Deliberately does **not** borrow Claude Code's OAuth token — Claude models
+  route via OpenRouter so nothing can invalidate your Claude Code session.
+
+### Fixed — the chat stops dying on long work (exit 130)
+
+- Agentic and Ministry turns that legitimately think for minutes were being
+  killed by the response watchdog (Hermes maps the kill to a KeyboardInterrupt
+  → exit 130). The watchdog now budgets by mode — up to 10 min for Ministry,
+  5 min for auto-approved turns — and reads Hermes' own end-of-run marker.
+- The main chat now **auto-approves its own tools** (same trust model as voice),
+  so "read all my sessions and…" prompts run instead of deadlocking.
+
+### New — Ministry of Experts, reliable + readable
+
+- Selecting the **ministry** preset now sticks when you reopen a thread, so the
+  next message runs the real Mixture-of-Agents instead of the default model
+  role-playing it.
+- Every expert **streams its full answer deterministically** (via a local
+  `HERMES_MOA_ECHO` bridge) — no more "sometimes I see the experts, sometimes I
+  don't". Each reference renders as a **collapsed, colour-coded chip** with the
+  verdict leading, and a factual credit footer
+  (`⚝ ministry · gpt-5.5 + glm-5.2 + deepseek-v4-pro → claude-fable-5`).
+
+### New — chat controls: Stop + Queue
+
+- A **Stop** button ends a running turn and kills the Hermes process
+  server-side, so token spend actually stops.
+- **Queue a message** while a turn is running (latest wins, cancellable) — it
+  fires the instant the turn finishes, so you can steer without losing keystrokes.
+
+### Improved — chat rendering
+
+- Replies now render as **glass cards** with real markdown: Fraunces headings,
+  source-numbered lists, fenced code blocks, **green/red diff cards** (raw
+  tool-output diffs auto-detected), tables, and quiet nested bullets. Agent-init
+  boilerplate collapses into one expandable "session initialized" chip.
+
+### Fixed — sessions sidebar + voice remember themselves
+
+- The sidebar now reads Hermes 0.17's **sqlite session store** (`state.db`), so
+  every recent chat shows up again — not just the ones in the legacy folder.
+- The voice engine's OpenAI key is **persisted to `~/.hermes/.env`** and
+  reloaded on every spawn, so it survives dev-server restarts and dashboard
+  port changes instead of being re-prompted each time.
+
+---
+
 ## V2.10.1 — 30 Jun 2026
 
 A polish + hardening pass on the V2.10 Hermes chat.

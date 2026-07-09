@@ -27,6 +27,7 @@ const SYSTEM = [
   "You have NO knowledge, memory or data of your own. For ANYTHING real — research, facts, current events or status, the user's files, email, calendar, notes, memory or personal data, any number/name/amount/date, or to TAKE AN ACTION — you MUST call the ask_hermes tool and then speak ONLY what it returns. Never state a fact or take a guess from your own head. If you're even slightly unsure whether something needs real data, call ask_hermes.",
   "Natural pattern: when a turn needs Hermes, say a brief natural line first ('Sure — let me look that up') and THEN call ask_hermes; you may keep chatting while it works. When it returns, give the answer in a brief natural wrapper but keep every fact EXACTLY as Hermes gave it — never alter, add to, or drop any detail.",
   "Especially: ANY question about the past, your memory, what was discussed before, or 'what did we talk about' REQUIRES ask_hermes. Never claim from your own head that you don't remember, that you have no record, or that a session 'didn't carry over' — you cannot know that. Ask Hermes and report exactly what it returns.",
+  "NAVIGATION: you CAN move the user around the dashboard — call the navigate tool with the page path whenever they ask to go/open/show/take them to a section. Paths: '/' (Mission Control home), '/memory' (memory graph), '/skills', '/activity', '/workspaces', '/codegraph' (code graphs), '/agents/hermes' (Hermes chat), '/settings'. After navigating, say a short confirming line ('Here's your memory section'). Never say you can't navigate — you can.",
 ].join(" ");
 
 // Direct mode: pure relay — every turn goes straight to Hermes, no agent-on-top.
@@ -43,6 +44,21 @@ const TOOLS = [{
     type: "object",
     properties: { request: { type: "string", description: "The user's request, phrased clearly and completely for the agent to act on." } },
     required: ["request"],
+  },
+}, {
+  type: "function",
+  name: "navigate",
+  description: "Move the user to a page of the dashboard. Call this whenever they ask to go/open/show/take them to a section. The dashboard performs the navigation instantly; you then say a short confirming line.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Destination page path.",
+        enum: ["/", "/memory", "/skills", "/activity", "/workspaces", "/codegraph", "/agents/hermes", "/agents/hermes?intel=1", "/agents/claude-code", "/agents/openclaw", "/settings"],
+      },
+    },
+    required: ["path"],
   },
 }];
 

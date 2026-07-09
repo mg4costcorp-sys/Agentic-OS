@@ -534,7 +534,7 @@ const DEMO_PERSONAS: PersonaYaml[] = [
     job: "Deep reasoning",
     description: "Reasoning at depth. Wrestles with ambiguous problems and teaches what it learned.",
     avatar: "assets/philosopher.png",
-    model: { provider: "anthropic", name: "claude-opus-4.8" },
+    model: { provider: "openrouter", name: "anthropic/claude-fable-5", effort: "max" },
     behavior: {
       tone: "patient, socratic, layered",
       system_prompt: "You are the Philosopher. Pull on threads. Question premises. Surface the meta-question behind the question. Explain your reasoning step by step.",
@@ -683,9 +683,29 @@ interface HermesSession {
 // ~/.hermes/pantheon/personas/*.yaml). Schema co-designed with Hermes — do
 // NOT diverge without updating PANTHEON_SEEDS in vite.config.ts too.
 // ────────────────────────────────────────────────────────────────────────────
+type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+const EFFORT_LEVELS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+const DEFAULT_EFFORT: EffortLevel = "high";
+// One-line hint per stop so the depth/cost trade is explicit before it's
+// saved into the YAML.
+const EFFORT_HINT: Record<EffortLevel, string> = {
+  low: "fastest — light reasoning, lowest spend",
+  medium: "balanced speed and depth",
+  high: "the model's default — deep reasoning where it matters",
+  xhigh: "extended reasoning on every step",
+  max: "no ceiling — hardest problems, highest spend",
+};
+// Which models expose a reasoning-effort knob. Fable 5 is the first —
+// widen the pattern as more providers ship one.
+function modelSupportsEffort(name: string): boolean {
+  return /fable/i.test(name);
+}
+
 interface PersonaModel {
   provider: string;
   name: string;
+  /** Reasoning-effort dial — only written for models that support it. */
+  effort?: EffortLevel;
 }
 interface PersonaBehavior {
   tone: string;
@@ -718,7 +738,10 @@ function personaJob(p: PersonaYaml): string {
 
 interface ModelCatalogEntry {
   provider: string;
-  models: Array<{ name: string; tier: "top" | "mid" | "cheap" | "free" }>;
+  models: Array<{
+    name: string;
+    tier: "frontier" | "top" | "mid" | "cheap" | "free";
+  }>;
 }
 
 function useHermesModels() {
@@ -732,6 +755,7 @@ function useHermesModels() {
           mixtures: [{ name: "ministry", references: 3, aggregator: "claude-opus-4.8" }],
           catalog: [
             { provider: "anthropic", models: [
+              { name: "claude-fable-5", tier: "frontier" as const },
               { name: "claude-opus-4.8", tier: "top" as const },
               { name: "claude-sonnet-4.6", tier: "mid" as const },
               { name: "claude-haiku-4.5", tier: "cheap" as const },
@@ -741,9 +765,12 @@ function useHermesModels() {
               { name: "gpt-5.4-nano", tier: "cheap" as const },
             ] },
             { provider: "openrouter", models: [
+              { name: "anthropic/claude-fable-5", tier: "frontier" as const },
               { name: "meta-llama/llama-3.3-70b-instruct:free", tier: "free" as const },
             ] },
           ],
+          configured: ["openai", "openai-codex", "openrouter"],
+          reasoningEffort: "medium",
         };
       }
       const res = await fetch("/__hermes_models");
@@ -1086,7 +1113,14 @@ function HermesPage() {
           <>
             <HermesConnectionsStrip />
             <HermesStatusBar status={status} />
-            <HermesChat status={status} />
+            {/* yolo: the main agent chat auto-approves its own tools. Without
+                it, any prompt that makes Hermes read files / search sessions /
+                browse hits a tool-approval prompt with no TTY to answer it and
+                the run aborts with exit 130. Same trust model as the voice
+                bridge + Knowledge-Graph chat (both already pass yolo): this
+                endpoint is loopback-only + token-gated, driving the user's own
+                local agent on their own machine. */}
+            <HermesChat status={status} yolo />
             <HermesStatsSection />
           </>
         )}
@@ -2135,6 +2169,11 @@ interface ChatMessage {
   // Render the content verbatim in a monospace <pre> (used for deterministic
   // command output like `hermes insights`, which is box-drawn + column-aligned).
   pre?: boolean;
+  // Attribution footer for Mixture-of-Agents replies — pre-rendered string
+  // like "ministry · gpt-5.5 + glm-5.2 + deepseek-v4-pro → claude-fable-5".
+  // Sourced from the preset in config.yaml (never from model output), so the
+  // "who did this" credit is factual.
+  via?: string;
 }
 
 // ── Composer model selector + context-window meter ──────────────────────────
@@ -2154,11 +2193,72 @@ type ChatModelPick = {
 type HermesModelsData = {
   default: { provider: string; name: string; context?: number } | null;
   catalog: ModelCatalogEntry[];
-  mixtures?: Array<{ name: string; references: number; aggregator?: string }>;
+  mixtures?: Array<{
+    name: string;
+    references: number;
+    referenceModels?: string[];
+    aggregator?: string;
+  }>;
   // Providers the user actually has credentials for; the picker hides the rest
   // so a model pick can't fail with "Unknown provider". Empty → show all.
   configured?: string[];
+  // Hermes' global reasoning-effort knob (agent.reasoning_effort in
+  // config.yaml) — drives the composer effort dial.
+  reasoningEffort?: string;
 };
+
+// Hermes' canonical effort levels (hermes_cli/main.py). On Claude models
+// these map onto Anthropic's adaptive-thinking effort — xhigh stays xhigh on
+// Fable 5 / 4.7+, and downgrades to max on older families.
+const HERMES_EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+type HermesEffort = (typeof HERMES_EFFORT_LEVELS)[number];
+const HERMES_EFFORT_HINT: Record<HermesEffort, string> = {
+  minimal: "lightest — alias for low on most models",
+  low: "fastest, light reasoning",
+  medium: "Hermes default — balanced",
+  high: "deep reasoning on hard steps",
+  xhigh: "deepest — recommended for agentic work",
+};
+// Cool→hot ramp keyed by LEVEL (not index), so "high" is the same color on
+// every model: light blue = lightest touch, amber-gold = strongest. All
+// stops stay bright enough to read on the deep-teal background (the earlier
+// dark-green top end was illegible).
+const EFFORT_COLOR: Record<string, string> = {
+  minimal: "#7DD3FC",
+  low: "#5EEAD4",
+  medium: "#34D399",
+  high: "#A3E635",
+  xhigh: "#FBBF24",
+  max: "#FFD21E",
+};
+
+// Which effort levels actually reach a given chat model — mirrors Hermes'
+// own capability tables so the dial never offers a stop the API would drop:
+//   · gpt-5 family    → minimal..high  (COPILOT_REASONING_EFFORTS_GPT5,
+//     hermes_cli/models.py — no xhigh)
+//   · o-series        → low..high      (COPILOT_REASONING_EFFORTS_O_SERIES)
+//   · Claude 4.7+/5   → low..xhigh     (adaptive thinking, anthropic_adapter;
+//     minimal is a legacy alias for low so we hide it)
+//   · Claude ≤4.6     → low..high      (xhigh not accepted; server downgrades)
+//   · reasoning models via OpenRouter (glm-5, deepseek v4/r1, grok 4+,
+//     gemini 3+, qwen3, minimax-m, kimi, fugu) → low..high (reasoning.effort)
+//   · everything else (non-reasoning models, MoA blends) → none: the knob
+//     does nothing, so the dial hides entirely.
+function effortLevelsForModel(
+  pick: { provider: string; name: string; mixture?: boolean } | null,
+): HermesEffort[] {
+  if (!pick || pick.mixture) return [];
+  const n = pick.name.toLowerCase();
+  if (/fable/.test(n)) return ["low", "medium", "high", "xhigh"];
+  if (/claude-(opus|sonnet|haiku)-(4\.[7-9]|[5-9])/.test(n))
+    return ["low", "medium", "high", "xhigh"];
+  if (/claude/.test(n)) return ["low", "medium", "high"];
+  if (/gpt-5/.test(n)) return ["minimal", "low", "medium", "high"];
+  if (/(^|\/)o[134](-|\b)/.test(n)) return ["low", "medium", "high"];
+  if (/glm-5|deepseek-(v4|r1)|grok-[4-9]|gemini-[3-9]|qwen3|minimax-m|kimi-k|fugu/.test(n))
+    return ["low", "medium", "high"];
+  return [];
+}
 
 const CTX_NUM_FMT = new Intl.NumberFormat("en", {
   notation: "compact",
@@ -2671,6 +2771,24 @@ function ComposerModelSelector({
                       <span className="hermes-mono flex-1 min-w-0 truncate" style={{ fontSize: 12, color: CREAM }}>
                         {shortModelName(m.name)}
                       </span>
+                      {m.tier === "frontier" && (
+                        <span
+                          className="hermes-mono"
+                          title="Frontier tier — supports the effort dial"
+                          style={{
+                            fontSize: 8,
+                            letterSpacing: "0.1em",
+                            textTransform: "uppercase",
+                            color: "#f0abfc",
+                            border: "1px solid rgba(240,171,252,0.4)",
+                            borderRadius: 4,
+                            padding: "1px 4px",
+                            flexShrink: 0,
+                          }}
+                        >
+                          frontier
+                        </span>
+                      )}
                       {isDefault && (
                         <span
                           className="hermes-mono"
@@ -2713,6 +2831,208 @@ function ComposerModelSelector({
             }}
           >
             switches just this conversation · add more in `hermes model`
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Composer effort dial — sets Hermes' GLOBAL reasoning effort
+// (agent.reasoning_effort in config.yaml) via POST /__hermes_effort. Global,
+// not per-conversation: `hermes chat -Q` re-reads config on every message, so
+// a change applies from the next message in every chat.
+//
+// Model-aware: the stops come from effortLevelsForModel(active model) so the
+// dial only ever offers levels the model's API actually accepts (gpt-5 has
+// no xhigh; Fable 5 does; llama-class models have no knob at all → the dial
+// hides entirely). If the saved global level isn't valid for the active
+// model, the display clamps to the nearest stop the model supports — which
+// is what the provider does server-side anyway.
+function ComposerEffortDial({
+  data,
+  active,
+}: {
+  data: HermesModelsData | undefined;
+  active: ChatModelPick | null;
+}) {
+  const demo = useDemoMode();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
+  const [demoOverride, setDemoOverride] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const activePick = active ?? (data?.default ? { ...data.default } : null);
+  const levels = effortLevelsForModel(activePick);
+  const raw = demoOverride ?? pending ?? data?.reasoningEffort ?? "medium";
+  // Clamp the saved global level onto this model's scale: exact match wins,
+  // otherwise the nearest stop at-or-below on the canonical ladder, else the
+  // model's lowest stop.
+  const canonIdx = HERMES_EFFORT_LEVELS.indexOf(raw as HermesEffort);
+  const current =
+    levels.find((l) => l === raw) ??
+    [...levels]
+      .reverse()
+      .find((l) => HERMES_EFFORT_LEVELS.indexOf(l) <= canonIdx) ??
+    levels[0];
+  const activeIdx = levels.indexOf(current);
+
+  // No knob on this model's API → no dial. Honest by omission.
+  if (levels.length === 0) return null;
+
+  async function pick(level: HermesEffort) {
+    setOpen(false);
+    if (demo) {
+      setDemoOverride(level);
+      return;
+    }
+    setPending(level);
+    try {
+      const t = await fetch("/__token").then((r) => r.json());
+      const res = await fetch("/__hermes_effort", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Claude-OS-Token": t.token,
+        },
+        body: JSON.stringify({ effort: level }),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      await queryClient.invalidateQueries({ queryKey: ["hermes-models"] });
+    } catch {
+      /* keep showing the server's value */
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="hermes-mono inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] transition-colors"
+        style={{
+          background: "rgba(0,0,0,0.35)",
+          color: CREAM,
+          border: "1px solid rgba(255,230,203,0.25)",
+          borderRadius: 8,
+        }}
+        title="Reasoning effort — how hard the model thinks (global Hermes setting)"
+      >
+        <span className="inline-flex items-end gap-[2px]">
+          {levels.map((l, i) => (
+            <span
+              key={l}
+              style={{
+                width: 2.5,
+                height: 3 + i * 2,
+                borderRadius: 1,
+                background:
+                  i <= activeIdx ? EFFORT_COLOR[l] : "rgba(255,230,203,0.22)",
+              }}
+            />
+          ))}
+        </span>
+        <span className="truncate" style={{ maxWidth: 96, color: EFFORT_COLOR[current] }}>
+          {current}
+        </span>
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full mb-2 left-0 z-50 flex flex-col"
+          style={{
+            width: 300,
+            background: "#0C2A28",
+            border: "1px solid rgba(255,230,203,0.18)",
+            borderRadius: 12,
+            boxShadow: "0 18px 50px rgba(0,0,0,0.6)",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: 6 }}>
+            {levels.map((level, i) => {
+              const isActive = level === current;
+              return (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => void pick(level)}
+                  className="w-full text-left flex items-center gap-2 px-2 py-1.5"
+                  style={{
+                    borderRadius: 6,
+                    background: isActive ? "rgba(52,211,153,0.10)" : "transparent",
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.background = isActive
+                      ? "rgba(52,211,153,0.10)"
+                      : "rgba(255,230,203,0.06)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.background = isActive
+                      ? "rgba(52,211,153,0.10)"
+                      : "transparent")
+                  }
+                >
+                  <span className="inline-flex items-end gap-[2px]" style={{ width: 18, flexShrink: 0 }}>
+                    {levels.map((l2, j) => (
+                      <span
+                        key={l2}
+                        style={{
+                          width: 2.5,
+                          height: 3 + j * 2,
+                          borderRadius: 1,
+                          background:
+                            j <= i ? EFFORT_COLOR[l2] : "rgba(255,230,203,0.22)",
+                        }}
+                      />
+                    ))}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="hermes-mono block" style={{ fontSize: 12, color: EFFORT_COLOR[level] }}>
+                      {level}
+                    </span>
+                    <span
+                      className="hermes-mono block truncate"
+                      style={{ fontSize: 9, color: "rgba(255,230,203,0.5)" }}
+                    >
+                      {HERMES_EFFORT_HINT[level]}
+                    </span>
+                  </span>
+                  {isActive && (
+                    <Check className="h-3.5 w-3.5" style={{ color: EFFORT_COLOR[level], flexShrink: 0 }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            className="hermes-mono"
+            style={{
+              fontSize: 8.5,
+              color: "rgba(255,230,203,0.4)",
+              padding: "6px 10px",
+              borderTop: "1px solid rgba(255,230,203,0.1)",
+            }}
+          >
+            {activePick ? `${shortModelName(activePick.name)} supports ${levels[0]}–${levels[levels.length - 1]}` : "global Hermes setting"} · applies from the next message
           </div>
         </div>
       )}
@@ -2937,6 +3257,14 @@ function HermesChatActive({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  // Stop + queue controls. sendingRef mirrors `sending` for the queue gate
+  // (the drain timeout would otherwise close over a stale state value);
+  // abortRef cancels the SSE fetch — the server kills the hermes child on
+  // request close, so Stop genuinely stops token spend, not just the UI.
+  const sendingRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const queuedRef = useRef<string | null>(null);
+  const [queued, setQueued] = useState<string | null>(null);
   const [intelOpen, setIntelOpen] = useState(false);
   // deep-link: /agents/hermes?intel=1 opens straight into the Intelligence view (demo affordance)
   useEffect(() => { try { if (new URLSearchParams(window.location.search).get("intel") === "1") setIntelOpen(true); } catch { /* ignore */ } }, []);
@@ -3240,9 +3568,12 @@ function HermesChatActive({
       if (!res.ok) throw new Error(`status ${res.status}`);
       const j = (await res.json()) as {
         sessionId: string;
+        model?: string | null;
         messages: Array<{ role: string; content: string; ts: string | null }>;
       };
       setActiveSessionId(j.sessionId);
+      const loadedVia =
+        typeof j.model === "string" ? mixtureVia(j.model) : undefined;
       setMessages(
         j.messages
           .filter((m) => m.role === "user" || m.role === "assistant")
@@ -3251,8 +3582,30 @@ function HermesChatActive({
             role: m.role === "assistant" ? ("hermes" as const) : ("user" as const),
             content: m.content,
             timestamp: m.ts ? new Date(m.ts).getTime() : Date.now(),
+            ...(m.role === "assistant" && loadedVia ? { via: loadedVia } : {}),
           })),
       );
+      // Restore the session's model into the composer chip so the next
+      // message routes the SAME way. Without this, opening a Ministry
+      // thread reset the pick to the default model — which then tried to
+      // roleplay/orchestrate the ensemble itself instead of Hermes running
+      // the real MoA preset.
+      const sessModel = typeof j.model === "string" ? j.model : "";
+      if (sessModel) {
+        const mix = modelsQ.data?.mixtures?.find((m) => m.name === sessModel);
+        if (mix) {
+          setPickedModel({
+            provider: "moa",
+            name: mix.name,
+            mixture: true,
+            references: mix.references,
+          });
+        } else if (sessModel.includes("/")) {
+          setPickedModel({ provider: "openrouter", name: sessModel });
+        }
+        // Bare ids (gpt-5.5 …) keep the current default — their provider
+        // is ambiguous (codex sub vs direct), so we don't guess.
+      }
     } catch {
       /* fail silently — sidebar will still show the click did something */
     } finally {
@@ -3341,12 +3694,58 @@ function HermesChatActive({
     return cleanHermesReply(accumulated).trim() || "Done.";
   }
 
-  async function handleSend() {
-    const text = input.trim();
+  // Factual ensemble credit for a Mixture-of-Agents reply, straight from the
+  // preset in config.yaml: "ministry · gpt-5.5 + glm-5.2 + … → claude-fable-5".
+  function mixtureVia(name: string): string | undefined {
+    const mix = modelsQ.data?.mixtures?.find((m) => m.name === name);
+    // Fallback when the mixture catalog hasn't loaded yet — still attribute
+    // the ensemble (the whole point of MoA is that it's NOT one model), just
+    // without the per-expert breakdown. Never silently omit the credit.
+    if (!mix) return `${name} · Mixture of Agents`;
+    const refs = (mix.referenceModels ?? []).map(shortModelName).join(" + ");
+    const agg = mix.aggregator ? shortModelName(mix.aggregator) : "aggregator";
+    return `${mix.name} · ${refs || `${mix.references} experts`} → ${agg}`;
+  }
+
+  // Turn teardown shared by every exit path: clears sending state, then
+  // auto-fires the queued message (single slot — latest wins) if one waits.
+  function finishTurn() {
+    setSending(false);
+    sendingRef.current = false;
+    abortRef.current = null;
+    void queryClient.invalidateQueries({ queryKey: ["hermes-sessions"] });
+    const q = queuedRef.current;
+    queuedRef.current = null;
+    setQueued(null);
+    if (q) window.setTimeout(() => void handleSend(q), 80);
+  }
+
+  // Stop the running turn: aborts the SSE fetch; the server's req-close
+  // handler SIGTERMs the hermes child, so the model stops burning tokens.
+  function handleStop() {
+    abortRef.current?.abort();
+  }
+
+  async function handleSend(forcedText?: string) {
+    const text = (forcedText ?? input).trim();
+    // A turn is running → QUEUE the message instead of dropping the
+    // keystroke. One slot, latest wins — type a steer, hit Enter, and it
+    // fires the instant the current turn finishes.
+    if (sendingRef.current) {
+      if (text) {
+        queuedRef.current = text;
+        setQueued(text);
+        if (!forcedText) setInput("");
+      }
+      return;
+    }
     // Allow sending with images and no text (e.g. "what's in this?")
-    if ((!text && attachments.length === 0) || sending) return;
-    setInput("");
+    if (!text && attachments.length === 0) return;
+    if (!forcedText) setInput("");
     setSending(true);
+    sendingRef.current = true;
+    const ac = new AbortController();
+    abortRef.current = ac;
 
     // Prefix the prompt with image references so Hermes can read them
     // from disk. Vision-capable models pick the paths up via Hermes'
@@ -3417,20 +3816,33 @@ function HermesChatActive({
           prompt: promptForServer,
           ...(activeSessionId ? { sessionId: activeSessionId } : {}),
           ...(toolsets !== undefined ? { toolsets } : {}),
-          ...(yolo ? { yolo: true, graph: true } : {}),
+          // Auto-approve tools whenever this chat runs in yolo mode. graph
+          // mode (preload the graphify skill) is separate — it belongs only
+          // to the seeded Knowledge-Graph chat, NOT the general agent chat,
+          // so it's keyed off seedContext rather than riding on yolo.
+          ...(yolo ? { yolo: true } : {}),
+          ...(seedContext ? { graph: true } : {}),
           // Per-conversation model override (skipped when on the default).
           ...(pickedModel ? { model: pickedModel.name, provider: pickedModel.provider } : {}),
         }),
+        signal: ac.signal,
       });
     } catch (err: any) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === replyId
-            ? { ...m, content: `⚠ Could not reach hermes: ${err?.message ?? "unknown"}` }
-            : m,
-        ),
-      );
-      setSending(false);
+      if (err?.name === "AbortError") {
+        setMessages((prev) => [
+          ...prev,
+          { id: replyId, role: "hermes", content: "■ stopped", timestamp: Date.now() },
+        ]);
+      } else {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === replyId
+              ? { ...m, content: `⚠ Could not reach hermes: ${err?.message ?? "unknown"}` }
+              : m,
+          ),
+        );
+      }
+      finishTurn();
       return;
     }
 
@@ -3440,7 +3852,7 @@ function HermesChatActive({
           m.id === replyId ? { ...m, content: `⚠ Chat endpoint returned ${response.status}.` } : m,
         ),
       );
-      setSending(false);
+      finishTurn();
       return;
     }
 
@@ -3454,6 +3866,7 @@ function HermesChatActive({
     let buffer = "";
     let accumulated = "";
 
+    try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -3483,6 +3896,9 @@ function HermesChatActive({
                 role: "hermes",
                 content: cleanHermesReply(accumulated).trimEnd(),
                 timestamp: Date.now(),
+                ...(pickedModel?.mixture
+                  ? { via: mixtureVia(pickedModel.name) }
+                  : {}),
               },
             ]);
           } else {
@@ -3513,10 +3929,32 @@ function HermesChatActive({
         }
       }
     }
-    setSending(false);
-    // Hermes just wrote a new session JSON (or appended to the resumed one).
-    // Invalidate the sessions list so the sidebar reflects it immediately.
-    void queryClient.invalidateQueries({ queryKey: ["hermes-sessions"] });
+    } catch (err: any) {
+      // Stop pressed mid-stream: the fetch abort throws here. Mark the
+      // partial reply so it's obvious the turn was cut, not completed.
+      if (err?.name === "AbortError") {
+        if (hermesAppended) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === replyId
+                ? {
+                    ...m,
+                    content: cleanHermesReply(accumulated).trimEnd() + "\n\n■ stopped",
+                  }
+                : m,
+            ),
+          );
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            { id: replyId, role: "hermes", content: "■ stopped", timestamp: Date.now() },
+          ]);
+        }
+      }
+    }
+    // Hermes just wrote a new session (or appended to the resumed one) —
+    // finishTurn refreshes the sidebar and fires any queued message.
+    finishTurn();
   }
 
   return (
@@ -3618,7 +4056,7 @@ function HermesChatActive({
           {/* Scrolling message area */}
           <div
             ref={scrollerRef}
-            className="relative flex-1 px-6 py-6 space-y-4"
+            className="relative flex-1 px-6 py-6 space-y-6"
             // Chrome's scroll-latch pauses page scrolling for ~150ms when
             // the wheel hits a nested scroller's boundary. That's the
             // "stops me, then lets me scroll" feel user reported.
@@ -3804,6 +4242,7 @@ function HermesChatActive({
                   active={activeModel}
                   onPick={setPickedModel}
                 />
+                <ComposerEffortDial data={modelsQ.data} active={activeModel} />
                 <ChatCommandsMenu
                   onRun={runCommand}
                   onSummarize={summarizeAndReset}
@@ -3891,20 +4330,75 @@ function HermesChatActive({
                   (e.currentTarget.style.borderColor = "rgba(255,230,203,0.25)")
                 }
               />
-              <button
-                onClick={() => void handleSend()}
-                disabled={(!input.trim() && attachments.length === 0) || sending}
-                className="hermes-mono self-stretch px-5 text-[12px] uppercase tracking-[0.18em] transition-all disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 border shrink-0"
+              {sending ? (
+                <div className="flex flex-col gap-1.5 self-stretch shrink-0">
+                  <button
+                    onClick={handleStop}
+                    className="hermes-mono flex-1 px-5 text-[11px] uppercase tracking-[0.18em] inline-flex items-center justify-center gap-2 border transition-colors"
+                    style={{
+                      background: "rgba(252,165,165,0.12)",
+                      color: "#fca5a5",
+                      borderColor: "rgba(252,165,165,0.55)",
+                    }}
+                    title="Stop this turn — the Hermes process is killed server-side too, so token spend stops"
+                  >
+                    ■ Stop
+                  </button>
+                  <button
+                    onClick={() => void handleSend()}
+                    disabled={!input.trim()}
+                    className="hermes-mono flex-1 px-5 text-[11px] uppercase tracking-[0.18em] inline-flex items-center justify-center gap-2 border disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    style={{
+                      background: "transparent",
+                      color: CREAM,
+                      borderColor: "rgba(255,230,203,0.4)",
+                    }}
+                    title="Queue this message — it sends the instant the current turn finishes"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    Queue
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => void handleSend()}
+                  disabled={!input.trim() && attachments.length === 0}
+                  className="hermes-mono self-stretch px-5 text-[12px] uppercase tracking-[0.18em] transition-all disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 border shrink-0"
+                  style={{
+                    background: CREAM,
+                    color: BG,
+                    borderColor: CREAM,
+                  }}
+                >
+                  <Send className="h-4 w-4" />
+                  Send
+                </button>
+              )}
+            </div>
+            {queued && (
+              <div
+                className="hermes-mono mt-2 text-[10px] uppercase tracking-[0.16em] inline-flex items-center gap-2 px-2.5 py-1.5 border"
                 style={{
-                  background: CREAM,
-                  color: BG,
-                  borderColor: CREAM,
+                  color: "rgba(255,230,203,0.75)",
+                  borderColor: "rgba(255,230,203,0.3)",
+                  background: "rgba(255,230,203,0.05)",
                 }}
               >
-                <Send className="h-4 w-4" />
-                Send
-              </button>
-            </div>
+                <span style={{ color: "#FFD21E" }}>⏳</span>
+                queued · {queued.slice(0, 70)}
+                {queued.length > 70 ? "…" : ""}
+                <button
+                  onClick={() => {
+                    queuedRef.current = null;
+                    setQueued(null);
+                  }}
+                  style={{ color: "#fca5a5" }}
+                  title="Cancel the queued message"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             {!status.configured && (
               <div
                 className="hermes-mono mt-2 text-[11px] flex items-center gap-1.5 uppercase tracking-wider"
@@ -4270,11 +4764,20 @@ function CopyMsgButton({ text }: { text: string }) {
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   if (isUser) {
+    // Cream card, softly rounded with a squared corner anchoring toward the
+    // avatar. Shadow instead of a hard border so it floats over the art.
     return (
       <div className="flex justify-end items-start gap-3">
         <div
-          className="max-w-[78%] px-4 py-3 text-[13.5px] leading-relaxed border hermes-mono"
-          style={{ background: CREAM, color: BG, borderColor: CREAM }}
+          className="max-w-[78%] px-5 py-3.5 text-[13.5px] leading-relaxed hermes-mono"
+          style={{
+            background: "linear-gradient(180deg, #FFF2DE 0%, #FFE6CB 100%)",
+            color: BG,
+            borderRadius: "16px 4px 16px 16px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
         >
           {message.content}
         </div>
@@ -4283,24 +4786,30 @@ function ChatBubble({ message }: { message: ChatMessage }) {
     );
   }
   // Hermes (assistant) message. Readability-tuned:
-  //  • SOLID near-opaque background (0.96) so the labyrinth texture can't
-  //    bleed through and muddy the text — that was the main "hard to read".
+  //  • Glassy near-opaque teal card (gradient + blur) so the labyrinth art
+  //    melts away behind the text instead of bleeding through — while the
+  //    bubble still feels part of the page rather than a hard box.
+  //  • Rounded 18px with a squared top-left corner anchoring to the avatar,
+  //    hairline cream border + deep shadow for lift.
   //  • Clean sans body font (not Fraunces serif) — serif is gorgeous for
   //    headlines but tiring for dense multi-paragraph answers.
-  //  • Generous line-height + comfortable 15px size + a wider max-width so
-  //    long structured answers breathe instead of cramming.
-  //  • Light markdown so model dashes/headers/`code` render as real
-  //    structure rather than raw characters.
+  //  • Generous padding + line-height so long structured answers breathe.
   return (
     <div className="flex justify-start items-start gap-3 group">
       <HermesAvatar />
       <div className="flex flex-col items-start max-w-[88%]">
         <div
-          className="px-5 py-4 border"
+          className="px-6 py-5"
           style={{
-            background: "rgba(6,22,22,0.96)",
+            background:
+              "linear-gradient(165deg, rgba(10,32,31,0.97) 0%, rgba(5,18,18,0.97) 100%)",
             color: "#F3E9DA",
-            borderColor: "rgba(255,230,203,0.28)",
+            border: "1px solid rgba(255,230,203,0.16)",
+            borderTop: "1px solid rgba(255,230,203,0.28)",
+            borderRadius: "4px 18px 18px 18px",
+            boxShadow: "0 14px 44px rgba(0,0,0,0.5)",
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
           }}
         >
           {message.pre ? (
@@ -4323,6 +4832,27 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           ) : (
             <span style={{ opacity: 0.5 }}>…</span>
           )}
+          {message.via && (
+            <div
+              className="hermes-mono"
+              style={{
+                marginTop: 12,
+                paddingTop: 8,
+                borderTop: "1px solid rgba(255,230,203,0.12)",
+                fontSize: 9.5,
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+                color: "rgba(255,210,30,0.8)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>⚝</span>
+              {message.via}
+            </div>
+          )}
         </div>
         {message.content ? <CopyMsgButton text={message.content} /> : null}
       </div>
@@ -4334,121 +4864,831 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 // answers readable: paragraphs, bullet/numbered lists, `inline code`,
 // **bold**, and ## headings. Deliberately tiny (no external dep) and
 // styled for the cream-on-teal chat. Body uses a clean sans for legibility.
-function ChatMarkdown({ text }: { text: string }) {
-  const sans =
-    'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-  // Inline: **bold** and `code`.
-  const renderInline = (s: string, keyBase: string) => {
-    const parts: ReactNode[] = [];
-    const re = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
-    let last = 0;
-    let m: RegExpExecArray | null;
-    let i = 0;
-    while ((m = re.exec(s))) {
-      if (m.index > last) parts.push(s.slice(last, m.index));
-      if (m[2] !== undefined) {
-        parts.push(
-          <strong key={`${keyBase}-b${i}`} style={{ color: CREAM, fontWeight: 600 }}>
-            {m[2]}
-          </strong>,
-        );
-      } else if (m[3] !== undefined) {
-        parts.push(
-          <code
-            key={`${keyBase}-c${i}`}
-            style={{
-              fontFamily: '"Courier Prime", ui-monospace, monospace',
-              fontSize: "12.5px",
-              background: "rgba(255,230,203,0.12)",
-              color: "#FFE6CB",
-              padding: "1px 5px",
-              borderRadius: 4,
-            }}
-          >
-            {m[3]}
-          </code>,
-        );
-      }
-      last = m.index + m[0].length;
-      i++;
-    }
-    if (last < s.length) parts.push(s.slice(last));
-    return parts;
-  };
+// ── Chat markdown renderer ──────────────────────────────────────────────────
+// Renders Hermes replies in the page's design language: Fraunces serif
+// headings, amber list markers, real fenced-code blocks, green/red diff
+// cards (unfenced tool-output diffs are auto-detected), tables, quotes and
+// links. All parsing is line-based, no dangerouslySetInnerHTML.
+const MD_SANS =
+  'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const MD_MONO = '"Courier Prime", ui-monospace, monospace';
 
-  const lines = text.split("\n");
-  const blocks: ReactNode[] = [];
-  let list: { kind: "ul" | "ol"; items: string[] } | null = null;
-  const flushList = (key: string) => {
-    if (!list) return;
-    const Tag = list.kind === "ul" ? "ul" : "ol";
-    blocks.push(
-      <Tag
-        key={key}
-        style={{
-          fontFamily: sans,
-          fontSize: "14.5px",
-          lineHeight: 1.62,
-          margin: "6px 0",
-          paddingLeft: 20,
-          listStyleType: list.kind === "ul" ? "disc" : "decimal",
-        }}
-      >
-        {list.items.map((it, j) => (
-          <li key={j} style={{ marginBottom: 3 }}>
-            {renderInline(it, `${key}-${j}`)}
-          </li>
-        ))}
-      </Tag>,
-    );
-    list = null;
-  };
-
-  lines.forEach((raw, idx) => {
-    const line = raw.trimEnd();
-    const ul = line.match(/^\s*[-•]\s+(.*)$/);
-    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    const h = line.match(/^(#{1,3})\s+(.*)$/);
-    if (ul) {
-      if (list?.kind !== "ul") flushList(`l${idx}`);
-      list = list ?? { kind: "ul", items: [] };
-      list.items.push(ul[1]);
-    } else if (ol) {
-      if (list?.kind !== "ol") flushList(`l${idx}`);
-      list = list ?? { kind: "ol", items: [] };
-      list.items.push(ol[1]);
-    } else if (h) {
-      flushList(`l${idx}`);
-      blocks.push(
-        <div
-          key={`h${idx}`}
+// Inline: `code`, **bold**, *italic*, [text](url), bare urls.
+function mdInline(s: string, keyBase: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  const re =
+    /(`([^`]+)`|\*\*([^*]+)\*\*|\*([^*\s][^*]*)\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s<>()]+))/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  const linkStyle = {
+    color: "#FFD21E",
+    textDecoration: "underline",
+    textDecorationColor: "rgba(255,210,30,0.45)",
+    textUnderlineOffset: 2,
+  } as const;
+  // Any "**" left in plain text after the regex pass is an ORPHAN (its pair
+  // sits across a line/block boundary the stream broke) — showing literal
+  // asterisks always looks broken, so strip them from display.
+  const plain = (t: string) => t.replace(/\*\*/g, "");
+  while ((m = re.exec(s))) {
+    if (m.index > last) parts.push(plain(s.slice(last, m.index)));
+    if (m[2] !== undefined) {
+      parts.push(
+        <code
+          key={`${keyBase}-c${i}`}
           style={{
-            fontFamily: sans,
-            fontSize: "13px",
-            fontWeight: 700,
-            color: CREAM,
-            margin: "10px 0 2px",
-            letterSpacing: "0.01em",
+            fontFamily: MD_MONO,
+            fontSize: "12.5px",
+            background: "rgba(255,230,203,0.12)",
+            color: "#FFE6CB",
+            padding: "1px 5px",
+            borderRadius: 4,
           }}
         >
-          {renderInline(h[2], `h${idx}`)}
+          {m[2]}
+        </code>,
+      );
+    } else if (m[3] !== undefined) {
+      parts.push(
+        <strong key={`${keyBase}-b${i}`} style={{ color: CREAM, fontWeight: 650 }}>
+          {m[3]}
+        </strong>,
+      );
+    } else if (m[4] !== undefined) {
+      parts.push(
+        <em key={`${keyBase}-i${i}`} style={{ color: "#E8DCC8" }}>
+          {m[4]}
+        </em>,
+      );
+    } else if (m[5] !== undefined && m[6] !== undefined) {
+      parts.push(
+        <a key={`${keyBase}-a${i}`} href={m[6]} target="_blank" rel="noreferrer" style={linkStyle}>
+          {m[5]}
+        </a>,
+      );
+    } else if (m[7] !== undefined) {
+      // Bare url — keep trailing punctuation out of the link.
+      const url = m[7].replace(/[.,;:!?]+$/, "");
+      const trail = m[7].slice(url.length);
+      parts.push(
+        <a key={`${keyBase}-u${i}`} href={url} target="_blank" rel="noreferrer" style={linkStyle}>
+          {url}
+        </a>,
+      );
+      if (trail) parts.push(trail);
+    }
+    last = m.index + m[0].length;
+    i++;
+  }
+  if (last < s.length) parts.push(plain(s.slice(last)));
+  return parts;
+}
+
+// Diff card — green adds, red removals, amber hunk headers, cream file line.
+function MdDiffBlock({ lines: dl, k }: { lines: string[]; k: string }) {
+  return (
+    <div
+      key={k}
+      style={{
+        margin: "10px 0",
+        border: "1px solid rgba(255,230,203,0.2)",
+        borderRadius: 10,
+        background: "rgba(0,0,0,0.45)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        className="hermes-mono"
+        style={{
+          fontSize: 9,
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          color: "rgba(255,210,30,0.75)",
+          padding: "5px 12px",
+          borderBottom: "1px solid rgba(255,230,203,0.12)",
+          background: "rgba(255,230,203,0.04)",
+        }}
+      >
+        diff
+      </div>
+      <div style={{ overflowX: "auto", padding: "8px 0", fontFamily: MD_MONO, fontSize: 12, lineHeight: 1.6 }}>
+        {dl.map((l, j) => {
+          const isFile =
+            /^(diff --git|[+]{3}\s|-{3}\s|index\s)/.test(l) || /^[ab]\/\S+\s*(→|->)\s*[ab]\//.test(l);
+          const isHunk = /^@@/.test(l);
+          const isAdd = !isFile && l.startsWith("+");
+          const isDel = !isFile && l.startsWith("-");
+          return (
+            <div
+              key={j}
+              style={{
+                padding: "0 12px",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                color: isFile
+                  ? CREAM
+                  : isHunk
+                    ? "rgba(255,210,30,0.8)"
+                    : isAdd
+                      ? "#86efac"
+                      : isDel
+                        ? "#fca5a5"
+                        : "rgba(243,233,218,0.75)",
+                background: isAdd
+                  ? "rgba(134,239,172,0.07)"
+                  : isDel
+                    ? "rgba(252,165,165,0.06)"
+                    : "transparent",
+                fontWeight: isFile ? 600 : 400,
+              }}
+            >
+              {l || " "}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Per-expert accent palette for Ministry streams — Reference 1 teal,
+// 2 violet, 3 green, then fuchsia/sky. Thinking blocks inherit the color of
+// the reference section they sit in, so you can see WHO is thinking at a
+// glance; thinking before any reference (the aggregator/core) stays amber.
+const MOA_REF_COLORS = ["#5FD0C5", "#A78BFA", "#86efac", "#F0ABFC", "#7DD3FC"];
+
+function ChatMarkdown({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const blocks: ReactNode[] = [];
+  let i = 0;
+  let moaRefIdx = -1;
+  const moaAccent = () =>
+    moaRefIdx >= 0
+      ? MOA_REF_COLORS[moaRefIdx % MOA_REF_COLORS.length]
+      : "rgba(255,210,30,0.85)";
+
+  const isDiffStart = (l: string) =>
+    /^diff --git\s/.test(l) ||
+    /^@@ [-+0-9, ]+@@/.test(l) ||
+    /^[ab]\/\S+\s*(→|->)\s*[ab]\//.test(l);
+  const isDiffLine = (l: string) =>
+    l === "" || /^[+\-@ \\]/.test(l) || isDiffStart(l) || /^index\s/.test(l);
+
+  let blockSeq = 0;
+  while (i < lines.length) {
+    const raw = lines[i];
+    const line = raw.trimEnd();
+    // Monotonic per-block key. NOT `b${i}` — some branches (e.g. an init blob
+    // sharing a line with a ◇ Reference marker) reprocess the same index,
+    // which would mint duplicate keys and let React swap the two collapsibles.
+    const key = `b${i}-${blockSeq++}`;
+
+    // Agent-init boilerplate — "🤖 AI Agent initialized …", "✅ Enabled
+    // toolset …", "Loaded 32 tools: …". Useful for debugging, terrible as
+    // chat copy. Collapse the whole run into one expandable dim line.
+    const INIT_RE =
+      /(AI Agent initialized|Enabled toolset|Final tool selection|Loaded \d+ tools|Unknown toolset|Some tools may not work|Enabled toolsets:|Context limit: [\d,]+ tokens)/;
+    if (INIT_RE.test(line)) {
+      const init: string[] = [];
+      while (i < lines.length && INIT_RE.test(lines[i])) {
+        const l = lines[i].trimEnd();
+        // A "◇ Reference …" marker can ride on the SAME line as the init
+        // blob — keep the init half here and hand the marker back to the
+        // normal parser so the divider still renders.
+        const refAt = l.search(/[⋮╎|┊┆┇┋]?\s*◇\s*Reference\s+\d+\s*\//);
+        if (refAt > 0) {
+          init.push(l.slice(0, refAt).trimEnd());
+          lines.splice(i, 1, l.slice(refAt));
+          break;
+        }
+        init.push(l);
+        i++;
+      }
+      blocks.push(
+        <details key={key} style={{ margin: "6px 0" }}>
+          <summary
+            className="hermes-mono"
+            style={{
+              fontSize: 9.5,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: "rgba(255,230,203,0.4)",
+              cursor: "pointer",
+              listStyle: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              border: "1px solid rgba(255,230,203,0.14)",
+              borderRadius: 6,
+              padding: "3px 8px",
+            }}
+          >
+            <span style={{ color: "rgba(255,210,30,0.6)" }}>⚙</span>
+            session initialized · toolsets &amp; context
+            <span style={{ opacity: 0.6 }}>▸ expand</span>
+          </summary>
+          <div
+            className="hermes-mono"
+            style={{
+              fontSize: 10.5,
+              lineHeight: 1.6,
+              color: "rgba(243,233,218,0.55)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              padding: "8px 10px",
+              marginTop: 6,
+              background: "rgba(0,0,0,0.35)",
+              border: "1px solid rgba(255,230,203,0.1)",
+              borderRadius: 8,
+            }}
+          >
+            {init.join("\n")}
+          </div>
+        </details>,
+      );
+      continue;
+    }
+
+    // MoA stream marker — "◇ Reference 2/3 — openrouter:z-ai/glm-5.2".
+    // Render as a labelled divider so each expert's section reads as a
+    // designed chapter break instead of raw stream text.
+    const moaRef = line.match(
+      // Separator tolerant of em-dash / en-dash / ASCII hyphen so a locale or
+      // terminal that normalizes the dash still renders the chapter break.
+      /^[\s⋮╎|┊┆┇┋]*◇\s*Reference\s+(\d+)\s*\/\s*(\d+)\s*[—–-]\s*(.+)$/,
+    );
+    if (moaRef) {
+      moaRefIdx = parseInt(moaRef[1], 10) - 1;
+      const accent = MOA_REF_COLORS[moaRefIdx % MOA_REF_COLORS.length];
+      i++;
+      // Swallow this expert's whole preview (its [thinking]-prefixed text
+      // runs) into a COLLAPSED section — the aggregator's verdict is the
+      // answer; each expert's full response stays one click away. This is
+      // what keeps a Ministry turn "short and sharp" on screen even though
+      // the full reference text streams in.
+      const refParts: string[] = [];
+      while (i < lines.length) {
+        const nl = lines[i].trimEnd();
+        if (nl.trim() === "") {
+          // Blank line: only continue if MORE thinking follows — otherwise
+          // the final (plain) answer starts and must stay outside.
+          let k = i + 1;
+          while (k < lines.length && lines[k].trim() === "") k++;
+          if (k < lines.length && /^\s*\[thinking\]/i.test(lines[k].trimEnd())) {
+            i = k;
+            continue;
+          }
+          break;
+        }
+        if (/^[\s⋮╎|┊┆┇┋]*◇\s*Reference/.test(nl)) break;
+        if (/^\s*\[thinking\]/i.test(nl)) {
+          const t: string[] = [nl.replace(/^\s*\[thinking\]\s*/i, "")];
+          i++;
+          while (i < lines.length) {
+            const cl = lines[i].trimEnd();
+            // Stop at anything that reads as the ANSWER starting — a new
+            // marker, structural markdown, or an ALL-CAPS lead like
+            // "VERDICT:" — even when the stream skipped the blank line.
+            if (
+              cl.trim() === "" ||
+              /^[\s⋮╎|┊┆┇┋]*◇\s*Reference/.test(cl) ||
+              /^\s*\[thinking\]/i.test(cl) ||
+              /^#{1,4}\s+/.test(cl) ||
+              /^\s*```/.test(cl) ||
+              /^\s*\|/.test(cl) ||
+              /^[A-Z][A-Z0-9 _'-]{2,}:/.test(cl.trim())
+            )
+              break;
+            t.push(cl);
+            i++;
+          }
+          refParts.push(t.join("\n"));
+          continue;
+        }
+        if (/^\s*\.{3}\s*\(\d+\s+more/.test(nl)) {
+          refParts.push(nl);
+          i++;
+          continue;
+        }
+        break;
+      }
+      blocks.push(
+        <details key={key} style={{ margin: "10px 0" }}>
+          <summary
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              cursor: "pointer",
+              listStyle: "none",
+            }}
+          >
+            <span style={{ color: accent, fontSize: 11, flexShrink: 0 }}>◇</span>
+            <span
+              className="hermes-mono"
+              style={{
+                fontSize: 9.5,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                color: accent,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Reference {moaRef[1]}/{moaRef[2]}
+            </span>
+            <span
+              className="hermes-mono"
+              style={{ fontSize: 10, color: "rgba(255,230,203,0.6)", whiteSpace: "nowrap" }}
+            >
+              {moaRef[3].trim()}
+            </span>
+            <span style={{ flex: 1, borderTop: "1px solid rgba(255,230,203,0.14)" }} />
+            <span
+              className="hermes-mono"
+              style={{ fontSize: 8.5, letterSpacing: "0.14em", color: `${accent}99`, whiteSpace: "nowrap" }}
+            >
+              ▸ full response
+            </span>
+          </summary>
+          {refParts.length > 0 && (
+            <div
+              style={{
+                borderLeft: `2px solid ${accent}`,
+                paddingLeft: 12,
+                margin: "8px 0 4px 4px",
+                fontFamily: MD_SANS,
+                fontSize: 13,
+                fontStyle: "italic",
+                color: "rgba(243,233,218,0.6)",
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {refParts.join("\n\n")}
+            </div>
+          )}
+        </details>,
+      );
+      continue;
+    }
+
+    // "[thinking] …" — expert/model reasoning. Collect the whole run (the
+    // prefix appears only on the first line of a wrapped block) and render
+    // dimmed + italic with a tiny label chip so it reads as backstage.
+    if (/^\s*\[thinking\]/i.test(line)) {
+      const think: string[] = [line.replace(/^\s*\[thinking\]\s*/i, "")];
+      i++;
+      while (i < lines.length) {
+        const nl = lines[i].trimEnd();
+        // Stop at anything structural — blank lines, the next marker, or
+        // content blocks (lists/headings/fences) that belong to the answer.
+        if (
+          nl.trim() === "" ||
+          /^[\s⋮╎|┊┆┇┋]*◇\s*Reference/.test(nl) ||
+          /^\s*\[thinking\]/i.test(nl) ||
+          /^\s*[-•*]\s+/.test(nl) ||
+          /^\s*\d+[.)]\s+/.test(nl) ||
+          /^#{1,4}\s+/.test(nl) ||
+          /^\s*```/.test(nl) ||
+          /^\s*\|/.test(nl)
+        )
+          break;
+        think.push(nl);
+        i++;
+      }
+      const thinkText = think
+        .join(" ")
+        .replace(/#+\s*/g, "")
+        .trim();
+      const tAccent = moaAccent();
+      blocks.push(
+        <div
+          key={key}
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "baseline",
+            margin: "6px 0",
+            borderLeft: `2px solid ${tAccent}`,
+            paddingLeft: 10,
+            opacity: 0.9,
+          }}
+        >
+          <span
+            className="hermes-mono"
+            style={{
+              fontSize: 8.5,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: tAccent,
+              border: `1px solid ${tAccent}55`,
+              borderRadius: 4,
+              padding: "1px 5px",
+              flexShrink: 0,
+            }}
+          >
+            thinking
+          </span>
+          <span
+            style={{
+              fontFamily: MD_SANS,
+              fontSize: 13,
+              fontStyle: "italic",
+              color: "rgba(243,233,218,0.55)",
+              lineHeight: 1.6,
+            }}
+          >
+            {thinkText}
+          </span>
         </div>,
       );
-    } else if (line.trim() === "") {
-      flushList(`l${idx}`);
-    } else {
-      flushList(`l${idx}`);
-      blocks.push(
-        <p
-          key={`p${idx}`}
-          style={{ fontFamily: sans, fontSize: "14.5px", lineHeight: 1.62, margin: "6px 0" }}
-        >
-          {renderInline(line, `p${idx}`)}
-        </p>,
-      );
+      continue;
     }
-  });
-  flushList("l-final");
+
+    // "... (N more lines)" — Hermes CLI preview truncation (pre-verbose
+    // sessions). Render as a quiet marker, not body text.
+    if (/^\s*\.{3}\s*\(\d+\s+more\s+lines?[^)]*\)\s*$/.test(line)) {
+      blocks.push(
+        <div
+          key={key}
+          className="hermes-mono"
+          style={{
+            fontSize: 9.5,
+            letterSpacing: "0.14em",
+            color: "rgba(255,230,203,0.35)",
+            margin: "4px 0",
+          }}
+        >
+          {line.trim()}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    // Fenced code — ```lang … ``` (a ```diff fence renders as a diff card).
+    const fence = line.match(/^\s*```(\w*)\s*$/);
+    if (fence) {
+      const lang = fence[1].toLowerCase();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+        body.push(lines[i]);
+        i++;
+      }
+      i++; // consume closing fence
+      const looksDiff =
+        lang === "diff" || body.filter((l) => /^[+-]/.test(l)).length >= Math.max(2, body.length * 0.3);
+      if (looksDiff) {
+        blocks.push(<MdDiffBlock key={key} k={key} lines={body} />);
+      } else {
+        blocks.push(
+          <div
+            key={key}
+            style={{
+              margin: "10px 0",
+              border: "1px solid rgba(255,230,203,0.2)",
+              borderRadius: 10,
+              background: "rgba(0,0,0,0.5)",
+              overflow: "hidden",
+            }}
+          >
+            {lang && (
+              <div
+                className="hermes-mono"
+                style={{
+                  fontSize: 9,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,230,203,0.55)",
+                  padding: "5px 12px",
+                  borderBottom: "1px solid rgba(255,230,203,0.12)",
+                  background: "rgba(255,230,203,0.04)",
+                }}
+              >
+                {lang}
+              </div>
+            )}
+            <pre
+              style={{
+                margin: 0,
+                padding: "10px 12px",
+                overflowX: "auto",
+                fontFamily: MD_MONO,
+                fontSize: 12,
+                lineHeight: 1.6,
+                color: "#FFE6CB",
+              }}
+            >
+              {body.join("\n")}
+            </pre>
+          </div>,
+        );
+      }
+      continue;
+    }
+
+    // Unfenced diff — Hermes tool output prints raw diffs into the reply.
+    if (isDiffStart(line)) {
+      const body: string[] = [];
+      while (i < lines.length && isDiffLine(lines[i].trimEnd())) {
+        body.push(lines[i].trimEnd());
+        i++;
+      }
+      while (body.length && body[body.length - 1] === "") body.pop();
+      blocks.push(<MdDiffBlock key={key} k={key} lines={body} />);
+      continue;
+    }
+
+    // Table — header row + |---|---| separator.
+    if (/^\s*\|.+\|\s*$/.test(line) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? "")) {
+      const parseRow = (l: string) =>
+        l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const header = parseRow(line);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
+        rows.push(parseRow(lines[i]));
+        i++;
+      }
+      blocks.push(
+        <div key={key} style={{ overflowX: "auto", margin: "10px 0" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr>
+                {header.map((h, j) => (
+                  <th
+                    key={j}
+                    className="hermes-mono"
+                    style={{
+                      fontSize: 9.5,
+                      letterSpacing: "0.16em",
+                      textTransform: "uppercase",
+                      color: "rgba(255,210,30,0.8)",
+                      textAlign: "left",
+                      padding: "6px 12px",
+                      borderBottom: "1px solid rgba(255,230,203,0.3)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {mdInline(h, `${key}-h${j}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) => (
+                <tr key={ri}>
+                  {r.map((c, ci) => (
+                    <td
+                      key={ci}
+                      style={{
+                        fontFamily: MD_SANS,
+                        fontSize: 13.5,
+                        lineHeight: 1.5,
+                        padding: "7px 12px",
+                        borderBottom: "1px solid rgba(255,230,203,0.1)",
+                        verticalAlign: "top",
+                      }}
+                    >
+                      {mdInline(c, `${key}-r${ri}c${ci}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
+    // Blockquote run.
+    if (/^\s*>\s?/.test(line)) {
+      const q: string[] = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+        q.push(lines[i].replace(/^\s*>\s?/, ""));
+        i++;
+      }
+      blocks.push(
+        <div
+          key={key}
+          style={{
+            borderLeft: "2px solid rgba(255,210,30,0.5)",
+            paddingLeft: 12,
+            margin: "10px 0",
+            fontFamily: '"Fraunces", serif',
+            fontStyle: "italic",
+            fontSize: 14.5,
+            lineHeight: 1.65,
+            color: "#E8DCC8",
+          }}
+        >
+          {q.map((ql, j) => (
+            <p key={j} style={{ margin: "3px 0" }}>
+              {mdInline(ql, `${key}-q${j}`)}
+            </p>
+          ))}
+        </div>,
+      );
+      continue;
+    }
+
+    // Horizontal rule.
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      blocks.push(
+        <div key={key} style={{ borderTop: "1px solid rgba(255,230,203,0.18)", margin: "14px 0" }} />,
+      );
+      i++;
+      continue;
+    }
+
+    // Headings — h1/h2 in Fraunces serif, h3 as a mono section label.
+    // Guard: a "heading" longer than ~90 chars is almost always a stream
+    // artifact (a whole sentence behind ##) — huge serif across 3 wrapped
+    // lines looks broken, so render those as a bold sans lead instead.
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      const depth = h[1].length;
+      if (depth <= 2 && h[2].length > 90) {
+        blocks.push(
+          <p
+            key={key}
+            style={{
+              fontFamily: MD_SANS,
+              fontSize: 15,
+              fontWeight: 650,
+              color: CREAM,
+              lineHeight: 1.6,
+              margin: "12px 0 4px",
+            }}
+          >
+            {mdInline(h[2], key)}
+          </p>,
+        );
+        i++;
+        continue;
+      }
+      if (depth <= 2) {
+        blocks.push(
+          <div
+            key={key}
+            style={{
+              fontFamily: '"Fraunces", serif',
+              fontSize: depth === 1 ? 18 : 16,
+              fontWeight: 600,
+              color: CREAM,
+              margin: "16px 0 6px",
+              paddingBottom: depth <= 2 ? 5 : 0,
+              borderBottom: "1px solid rgba(255,230,203,0.14)",
+            }}
+          >
+            {mdInline(h[2], key)}
+          </div>,
+        );
+      } else {
+        blocks.push(
+          <div
+            key={key}
+            className="hermes-mono"
+            style={{
+              fontSize: 10.5,
+              letterSpacing: "0.2em",
+              textTransform: "uppercase",
+              color: "rgba(255,210,30,0.85)",
+              margin: "14px 0 4px",
+            }}
+          >
+            {mdInline(h[2], key)}
+          </div>,
+        );
+      }
+      i++;
+      continue;
+    }
+
+    // Ordered list run — the source's own numbers are preserved so "2."
+    // stays "2." even when paragraphs sit between items.
+    const olm = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+    if (olm) {
+      const items: Array<{ num: string; text: string }> = [];
+      while (i < lines.length) {
+        const m2 = lines[i].trimEnd().match(/^\s*(\d+)[.)]\s+(.*)$/);
+        if (!m2) break;
+        items.push({ num: m2[1], text: m2[2] });
+        i++;
+      }
+      blocks.push(
+        <div key={key} style={{ margin: "8px 0", display: "flex", flexDirection: "column", gap: 5 }}>
+          {items.map((it, j) => (
+            <div key={j} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <span
+                className="hermes-mono"
+                style={{ fontSize: 12, color: "#FFD21E", flexShrink: 0, minWidth: 18, textAlign: "right" }}
+              >
+                {it.num}.
+              </span>
+              <span style={{ fontFamily: MD_SANS, fontSize: 14.5, lineHeight: 1.65 }}>
+                {mdInline(it.text, `${key}-${j}`)}
+              </span>
+            </div>
+          ))}
+        </div>,
+      );
+      continue;
+    }
+
+    // Unordered list run — nesting-aware. Markers are deliberately QUIET
+    // (small, dim cream — never a row of loud amber dots): top level gets a
+    // small "•", nested levels an en-dash, indented under their parent.
+    if (/^\s*[-•*]\s+/.test(line)) {
+      const items: Array<{ level: number; text: string }> = [];
+      while (i < lines.length) {
+        const l = lines[i].trimEnd();
+        const m2 = l.match(/^(\s*)[-•*]\s+(.*)$/);
+        if (!m2) break;
+        const level = Math.min(
+          2,
+          Math.floor(m2[1].replace(/\t/g, "  ").length / 2),
+        );
+        items.push({ level, text: m2[2] });
+        i++;
+      }
+      blocks.push(
+        <div key={key} style={{ margin: "6px 0", display: "flex", flexDirection: "column", gap: 3 }}>
+          {items.map((it, j) => (
+            <div
+              key={j}
+              style={{
+                display: "flex",
+                gap: 9,
+                alignItems: "baseline",
+                paddingLeft: it.level * 18,
+              }}
+            >
+              <span
+                style={{
+                  color:
+                    it.level === 0
+                      ? "rgba(255,230,203,0.5)"
+                      : "rgba(255,230,203,0.32)",
+                  flexShrink: 0,
+                  fontSize: 11,
+                  lineHeight: 1.6,
+                }}
+              >
+                {it.level === 0 ? "•" : "–"}
+              </span>
+              <span style={{ fontFamily: MD_SANS, fontSize: 14.5, lineHeight: 1.6 }}>
+                {mdInline(it.text, `${key}-${j}`)}
+              </span>
+            </div>
+          ))}
+        </div>,
+      );
+      continue;
+    }
+
+    // Blank line.
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+
+    // Paragraph — consecutive plain lines JOIN into one paragraph (markdown
+    // semantics). This also repairs **bold** / *italic* spans that the raw
+    // stream wrapped across line breaks, which otherwise showed literal
+    // asterisks.
+    const para: string[] = [line];
+    i++;
+    while (i < lines.length) {
+      const nl = lines[i].trimEnd();
+      if (
+        nl.trim() === "" ||
+        /^\s*[-•*]\s+/.test(nl) ||
+        /^\s*\d+[.)]\s+/.test(nl) ||
+        /^#{1,4}\s+/.test(nl) ||
+        /^\s*>/.test(nl) ||
+        /^\s*```/.test(nl) ||
+        /^\s*\|/.test(nl) ||
+        /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(nl) ||
+        /^[\s⋮╎|┊┆┇┋]*◇\s*Reference/.test(nl) ||
+        /^\s*\[thinking\]/i.test(nl) ||
+        /^\s*\.{3}\s*\(\d+\s+more/.test(nl) ||
+        isDiffStart(nl)
+      )
+        break;
+      para.push(nl);
+      i++;
+    }
+    blocks.push(
+      <p key={key} style={{ fontFamily: MD_SANS, fontSize: 14.5, lineHeight: 1.68, margin: "7px 0" }}>
+        {mdInline(para.join(" "), key)}
+      </p>,
+    );
+  }
 
   return <div style={{ color: "#F3E9DA" }}>{blocks}</div>;
 }
@@ -4876,7 +6116,7 @@ interface PersonaTemplate {
   name: string;
   job: string;
   description: string;
-  defaultModel: { provider: string; name: string };
+  defaultModel: { provider: string; name: string; effort?: EffortLevel };
 }
 
 function useHermesPantheonTemplates() {
@@ -4923,6 +6163,7 @@ function AddPersonaTile({ existingIds }: { existingIds: string[] }) {
   const [modelOverride, setModelOverride] = useState<{
     provider: string;
     name: string;
+    effort?: EffortLevel;
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -5259,13 +6500,29 @@ function AddPersonaTile({ existingIds }: { existingIds: string[] }) {
                   }
                 }
                 onPick={(p, n) => {
-                  setModelOverride({ provider: p, name: n });
+                  setModelOverride({
+                    provider: p,
+                    name: n,
+                    ...(modelSupportsEffort(n)
+                      ? { effort: modelOverride?.effort ?? DEFAULT_EFFORT }
+                      : {}),
+                  });
                   setModelDropdownOpen(false);
                 }}
                 onClose={() => setModelDropdownOpen(false)}
               />
             )}
           </label>
+
+          {/* Effort dial — only for models with a reasoning-effort knob. */}
+          {modelOverride && modelSupportsEffort(modelOverride.name) && (
+            <EffortDial
+              value={modelOverride.effort ?? DEFAULT_EFFORT}
+              onChange={(level) =>
+                setModelOverride({ ...modelOverride, effort: level })
+              }
+            />
+          )}
 
           {error && (
             <div
@@ -5403,6 +6660,15 @@ function PersonaCard({
                 ? persona.model.name.split("/").pop()?.replace(":free", " · free")
                 : persona.model.name}
             </span>
+            {persona.model.effort && (
+              <span
+                className="shrink-0"
+                title={`Effort dial: ${persona.model.effort}`}
+                style={{ color: "#FFD21E" }}
+              >
+                · {persona.model.effort}
+              </span>
+            )}
           </span>
         </div>
       </button>
@@ -5444,7 +6710,8 @@ function PersonaEditModal({
     descriptionDraft !== (persona.description ?? "") ||
     promptDraft !== originalPrompt ||
     model.name !== persona.model.name ||
-    model.provider !== persona.model.provider;
+    model.provider !== persona.model.provider ||
+    (model.effort ?? null) !== (persona.model.effort ?? null);
 
   // Close on Escape.
   useEffect(() => {
@@ -5474,9 +6741,12 @@ function PersonaEditModal({
       }
       if (
         model.name !== persona.model.name ||
-        model.provider !== persona.model.provider
+        model.provider !== persona.model.provider ||
+        (model.effort ?? null) !== (persona.model.effort ?? null)
       ) {
-        patch.model = model;
+        // effort: null tells the backend to drop the key — the model was
+        // switched to one without a reasoning-effort knob.
+        patch.model = { ...model, effort: model.effort ?? null };
       }
       await updatePersona(persona.id, patch);
       await queryClient.invalidateQueries({ queryKey: ["hermes-pantheon"] });
@@ -5707,13 +6977,27 @@ function PersonaEditModal({
                 catalog={models.catalog}
                 current={model}
                 onPick={(p, n) => {
-                  setModel({ provider: p, name: n });
+                  setModel({
+                    provider: p,
+                    name: n,
+                    ...(modelSupportsEffort(n)
+                      ? { effort: model.effort ?? DEFAULT_EFFORT }
+                      : {}),
+                  });
                   setModelOpen(false);
                 }}
                 onClose={() => setModelOpen(false)}
               />
             )}
           </label>
+
+          {/* Effort dial — only for models with a reasoning-effort knob. */}
+          {modelSupportsEffort(model.name) && (
+            <EffortDial
+              value={model.effort ?? DEFAULT_EFFORT}
+              onChange={(level) => setModel({ ...model, effort: level })}
+            />
+          )}
 
           {/* Summon phrase — read-only with copy */}
           <div className="flex flex-col gap-1.5">
@@ -5900,6 +7184,7 @@ function ModelDropdown({
   }, [onClose]);
 
   const TIER_LABEL: Record<string, string> = {
+    frontier: "frontier",
     top: "top",
     mid: "mid",
     cheap: "cheap",
@@ -5936,6 +7221,11 @@ function ModelDropdown({
                 key={`${group.provider}-${m.name}`}
                 type="button"
                 onClick={() => onPick(group.provider, m.name)}
+                title={
+                  modelSupportsEffort(m.name)
+                    ? "Supports the effort dial"
+                    : undefined
+                }
                 className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
                 style={{
                   background: isCurrent ? "rgba(255,230,203,0.08)" : "transparent",
@@ -5965,9 +7255,15 @@ function ModelDropdown({
                     color:
                       m.tier === "free"
                         ? "#86efac"
-                        : m.tier === "top"
-                          ? "#FFD21E"
-                          : "rgba(255,230,203,0.55)",
+                        : m.tier === "frontier"
+                          ? "#f0abfc"
+                          : m.tier === "top"
+                            ? "#FFD21E"
+                            : "rgba(255,230,203,0.55)",
+                    textShadow:
+                      m.tier === "frontier"
+                        ? "0 0 10px rgba(240,171,252,0.45)"
+                        : undefined,
                   }}
                 >
                   {TIER_LABEL[m.tier]}
@@ -5980,6 +7276,80 @@ function ModelDropdown({
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+// Effort dial — five-stop meter for models that expose a reasoning-effort
+// knob (currently Fable 5). Ticks rise like a gauge; the active stop and
+// everything below it light amber. Persisted to the YAML as model.effort.
+function EffortDial({
+  value,
+  onChange,
+}: {
+  value: EffortLevel;
+  onChange: (level: EffortLevel) => void;
+}) {
+  const activeIdx = EFFORT_LEVELS.indexOf(value);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span
+        className="hermes-mono text-[9.5px] uppercase tracking-[0.22em]"
+        style={{ color: "rgba(255,230,203,0.6)" }}
+      >
+        Effort dial
+      </span>
+      <div
+        className="flex items-stretch border"
+        style={{
+          background: "rgba(0,0,0,0.45)",
+          borderColor: "rgba(255,230,203,0.4)",
+        }}
+      >
+        {EFFORT_LEVELS.map((level, i) => {
+          const lit = i <= activeIdx;
+          const isActive = i === activeIdx;
+          return (
+            <button
+              key={level}
+              type="button"
+              onClick={() => onChange(level)}
+              title={EFFORT_HINT[level]}
+              className="flex-1 flex flex-col items-center justify-end gap-1.5 pt-2 pb-1.5 transition-colors"
+              style={{
+                background: isActive ? "rgba(52,211,153,0.08)" : "transparent",
+                borderRight:
+                  i < EFFORT_LEVELS.length - 1
+                    ? "1px solid rgba(255,230,203,0.15)"
+                    : "none",
+              }}
+            >
+              <span
+                className="w-1.5 transition-all"
+                style={{
+                  height: 6 + i * 4,
+                  background: lit ? EFFORT_COLOR[level] : "rgba(255,230,203,0.18)",
+                  boxShadow: lit ? `0 0 8px ${EFFORT_COLOR[level]}77` : "none",
+                }}
+              />
+              <span
+                className="hermes-mono text-[8.5px] uppercase tracking-[0.14em]"
+                style={{
+                  color: isActive ? EFFORT_COLOR[level] : "rgba(255,230,203,0.45)",
+                }}
+              >
+                {level}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <span
+        className="hermes-mono text-[9.5px] tracking-[0.12em]"
+        style={{ color: "rgba(255,230,203,0.4)" }}
+      >
+        {EFFORT_HINT[value]}
+      </span>
     </div>
   );
 }

@@ -303,17 +303,22 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
     try {
       const h = await fetch("http://localhost:8099/api/health").then((r) => r.json());
       setEngineUp(true); setEngineKeyed(!!h?.keyed);
-      if (h?.keyed || openaiKey) return startCall();
+      // Engine already keyed → go. Otherwise (up but unkeyed, e.g. after a
+      // dev-server restart) ask the server to key it — it re-loads the saved
+      // OPENAI_API_KEY from ~/.hermes/.env, so we don't need a localStorage
+      // key on this port at all.
+      if (h?.keyed) return startCall();
+      const started = await startEngine(openaiKey).catch(() => null);
+      if (started?.ok && started?.keyed) { setEngineKeyed(true); return startCall(openaiKey || undefined); }
     } catch {
       setEngineUp(false);
-      // Engine isn't up — but if we already have a saved key, silently re-spawn
-      // the voice engine with it instead of asking for the key every session.
-      if (openaiKey) {
-        const started = await startEngine(openaiKey).catch(() => null);
-        if (started?.ok) { setEngineUp(true); setEngineKeyed(true); return startCall(openaiKey); }
-      }
+      // Engine isn't up — spawn it. Pass the localStorage key if we have one;
+      // otherwise the server falls back to the key saved in ~/.hermes/.env, so
+      // voice keeps working across ports and restarts without re-prompting.
+      const started = await startEngine(openaiKey).catch(() => null);
+      if (started?.ok && started?.keyed) { setEngineUp(true); setEngineKeyed(true); return startCall(openaiKey || undefined); }
     }
-    setVoiceSetupOpen(true);  // only prompt when there's genuinely no saved key
+    setVoiceSetupOpen(true);  // only prompt when there's genuinely no saved key anywhere
   }
   // ask the dev server to spawn voice-lab with the user's key — no terminal needed
   async function startEngine(key: string, base?: string) {

@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { readdir, readFile, stat } from "node:fs/promises";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { execSync } from "node:child_process";
 import {
   IS_WIN,
@@ -986,8 +986,15 @@ function collectObsidianVaultCandidates(): { root: string; fromOverride?: boolea
   const candidates = new Map<string, { root: string; fromOverride?: boolean }>();
   const add = (raw: string | undefined | null, fromOverride = false) => {
     if (!raw) return;
-    const root = resolve(expandHomePath(raw.trim()));
+    let root = resolve(expandHomePath(raw.trim()));
     if (!isDirectory(root)) return;
+    // Canonicalize so a symlinked vault (e.g. a Desktop shortcut) and its
+    // target dedupe to one entry instead of parsing as two vaults.
+    try {
+      root = realpathSync(root);
+    } catch {
+      /* keep the lexical path */
+    }
     if (!fromOverride && !existsSync(join(root, ".obsidian"))) return;
     candidates.set(root, { root, fromOverride });
   };
@@ -1002,8 +1009,11 @@ function collectObsidianVaultCandidates(): { root: string; fromOverride?: boolea
     if (!existsSync(parent)) return;
     try {
       for (const entry of readdirSync(parent, { withFileTypes: true })) {
-        if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+        if (entry.name.startsWith(".")) continue;
         const child = join(parent, entry.name);
+        // Dirent.isDirectory() is false for symlinked vaults (a common
+        // Desktop-shortcut setup) — fall back to a stat that follows links.
+        if (!entry.isDirectory() && !(entry.isSymbolicLink() && isDirectory(child))) continue;
         add(child);
         if (scanChildren) {
           try {
@@ -1021,6 +1031,7 @@ function collectObsidianVaultCandidates(): { root: string; fromOverride?: boolea
     }
   };
 
+  scanOneLevel(HOME);
   scanOneLevel(join(HOME, "Documents"));
   scanOneLevel(join(HOME, "Desktop"));
   if (IS_WIN) {
@@ -1053,6 +1064,183 @@ async function findObsidianVaults(): Promise<ObsidianVaultInfo[]> {
         : `obsidian-${slugify(basename(vault.root) || `vault-${index + 1}`)}`,
     primary: index === 0,
   }));
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE GRAPH — relational map of the primary Obsidian vault.
+// Parses every wiki note's frontmatter + [[wikilinks]] into a typed
+// node/edge list the Memory page's Knowledge Explorer can walk. Content
+// stays local: live-data.json is gitignored, and every emitted string
+// still passes through sanitize() at write time.
+// ──────────────────────────────────────────────────────────────────────────
+
+interface KnowledgeNote {
+  id: string;
+  title: string;
+  type: string;
+  folder: string;
+  tags: string[];
+  domain?: string;
+  confidence?: string;
+  status?: string;
+  updated?: string;
+  excerpt?: string;
+  sourceCount?: number;
+  /** Outbound resolved wikilinks (note ids). */
+  out: string[];
+}
+
+// Vault housekeeping that shouldn't become graph nodes: raw transcript
+// dumps, templates, binary attachment folders, and agent/repo meta files.
+const KNOWLEDGE_SKIP_DIRS = new Set([
+  "raw",
+  "templates",
+  "template",
+  "attachments",
+  "assets",
+  "files",
+]);
+const KNOWLEDGE_SKIP_FILES = new Set(["claude.md", "readme.md", "log.md", "agents.md"]);
+
+// Folder → node type fallback for notes without a `type:` frontmatter key.
+const KNOWLEDGE_TYPE_BY_FOLDER: Record<string, string> = {
+  concepts: "concept",
+  concept: "concept",
+  sources: "source",
+  source: "source",
+  entities: "entity",
+  entity: "entity",
+  people: "entity",
+  topics: "topic",
+  topic: "topic",
+  reports: "report",
+  report: "report",
+};
+
+function parseNoteFrontmatter(md: string): { fm: Record<string, string>; body: string } {
+  const m = md.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!m) return { fm: {}, body: md };
+  const fm: Record<string, string> = {};
+  for (const line of m[1].split("\n")) {
+    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (kv) fm[kv[1].toLowerCase()] = kv[2].trim();
+  }
+  return { fm, body: md.slice(m[0].length) };
+}
+
+/** Parse an inline YAML list ("[a, b]") or a plain comma list into strings. */
+function fmList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map((t) => t.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
+}
+
+/** Flatten markdown to plain prose — wikilinks/links keep their labels. */
+function mdToPlain(text: string): string {
+  return text
+    .replace(/\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`>#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Prefer the note's TL;DR section; fall back to its first paragraph. */
+function extractNoteExcerpt(body: string): string | undefined {
+  let raw: string | undefined;
+  const tldrIdx = body.search(/^##\s*TL;?DR/im);
+  if (tldrIdx >= 0) {
+    const section = body
+      .slice(tldrIdx)
+      .replace(/^##[^\n]*\n+/, "")
+      .split(/\n#{1,6}\s/)[0];
+    raw = section.split(/\n\s*\n/)[0];
+  } else {
+    raw = body
+      .replace(/^#[^\n]*\n/m, "")
+      .split(/\n\s*\n/)
+      .find((p) => p.trim() && !p.trim().startsWith("#") && !p.trim().startsWith("!["));
+  }
+  if (!raw) return undefined;
+  const plain = mdToPlain(raw);
+  if (!plain) return undefined;
+  return plain.length > 300 ? `${plain.slice(0, 297)}…` : plain;
+}
+
+async function parseKnowledge(vault: ObsidianVaultInfo | undefined) {
+  if (!vault) return null;
+  const files = await walkMd(vault.root, vault.root);
+  type Draft = KnowledgeNote & { rawLinks: string[] };
+  const drafts: Draft[] = [];
+  for (const abs of files) {
+    if (drafts.length >= 600) break;
+    const rel = toPosix(relative(vault.root, abs));
+    const parts = rel.split("/");
+    if (parts.some((p) => KNOWLEDGE_SKIP_DIRS.has(p.toLowerCase()))) continue;
+    if (KNOWLEDGE_SKIP_FILES.has(basename(abs).toLowerCase())) continue;
+    let text: string;
+    try {
+      text = readFileSync(abs, "utf-8");
+    } catch {
+      continue;
+    }
+    if (text.length > 400_000) continue;
+    const { fm, body } = parseNoteFrontmatter(text);
+    const folderParts = parts.slice(0, -1).filter((p) => p.toLowerCase() !== "wiki");
+    const typeFolder = folderParts[0]?.toLowerCase() ?? "";
+    const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? basename(abs, ".md");
+    drafts.push({
+      id: basename(abs, ".md").toLowerCase(),
+      title: mdToPlain(title) || basename(abs, ".md"),
+      type: (fm.type || KNOWLEDGE_TYPE_BY_FOLDER[typeFolder] || "note").toLowerCase(),
+      folder: folderParts.join("/") || "root",
+      tags: fmList(fm.tags).slice(0, 10),
+      domain: fm.domain || undefined,
+      confidence: fm.confidence || undefined,
+      status: fm.status || undefined,
+      updated: fm.updated || fm.created || undefined,
+      excerpt: extractNoteExcerpt(body),
+      sourceCount: fm.sources ? Number(fm.sources) || undefined : undefined,
+      out: [],
+      rawLinks: [...body.matchAll(/\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g)].map((m) =>
+        m[1].trim().toLowerCase(),
+      ),
+    });
+  }
+  if (drafts.length === 0) return null;
+
+  // Resolve wikilinks against note ids (Obsidian resolves by basename).
+  const ids = new Set(drafts.map((d) => d.id));
+  const links: Array<{ s: string; t: string }> = [];
+  const seenEdges = new Set<string>();
+  let unresolved = 0;
+  for (const d of drafts) {
+    for (const raw of d.rawLinks) {
+      const target = raw.split("/").pop() ?? raw;
+      if (!ids.has(target)) {
+        unresolved++;
+        continue;
+      }
+      if (target === d.id) continue;
+      const key = `${d.id}→${target}`;
+      if (seenEdges.has(key)) continue;
+      seenEdges.add(key);
+      d.out.push(target);
+      links.push({ s: d.id, t: target });
+    }
+  }
+
+  const byType: Record<string, number> = {};
+  for (const d of drafts) byType[d.type] = (byType[d.type] ?? 0) + 1;
+  return {
+    vault: basename(vault.root),
+    stats: { notes: drafts.length, links: links.length, byType, unresolved },
+    notes: drafts.map(({ rawLinks: _raw, ...note }) => note),
+    links,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1601,6 +1789,16 @@ async function parseMemory() {
     sources.push({ root: vault.root, label: vault.label });
   }
 
+  // Relational knowledge graphs — frontmatter types, wikilink edges, TL;DR
+  // excerpts, one graph per vault. Feeds the Knowledge Explorer, which sorts
+  // the most link-dense (most relational) vault to the front as the default.
+  const knowledgeGraphs = (
+    await Promise.all(obsidianVaults.slice(0, 4).map((v) => parseKnowledge(v)))
+  ).filter((g): g is NonNullable<typeof g> => g !== null);
+  const knowledge = knowledgeGraphs.length
+    ? { graphs: knowledgeGraphs.sort((a, b) => b.stats.links - a.stats.links) }
+    : null;
+
   // Claude project memory dirs
   if (existsSync(PROJECTS_DIR)) {
     let projDirs: string[] = [];
@@ -1833,6 +2031,7 @@ async function parseMemory() {
 
   return {
     obsidianVaults,
+    knowledge,
     sources: sourceList,
     nodes,
     links,
@@ -2794,13 +2993,68 @@ async function gatherHermes(): Promise<HermesSnapshot | null> {
     /* ignore */
   }
 
-  // Sessions — list JSON files, parse the most recent 8 for preview data.
+  // Sessions — Hermes 0.17 moved conversation history into ~/.hermes/state.db
+  // (sqlite: sessions + messages tables). The JSON files under sessions/ are
+  // now mostly routing stubs with empty message arrays, which is why the
+  // Hermes feed used to show null first-messages and zero counts — Dream's
+  // single biggest blind spot (it prescribed this very fix). Read the DB
+  // first (readonly); fall through to the JSON scan for pre-0.17 installs.
   let sessionCount = 0;
   let lastActiveMs: number | null = null;
   const recentSessions: HermesSnapshot["recentSessions"] = [];
   try {
+    const dbPath = join(hermesHome, "state.db");
+    if (existsSync(dbPath)) {
+      const { Database } = await import("bun:sqlite");
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const total = db.query("SELECT COUNT(*) AS n FROM sessions").get() as { n?: number };
+        sessionCount = total?.n ?? 0;
+        // started_at/ended_at are epoch SECONDS (REAL). First user message is
+        // pulled per session via a correlated subquery — 8 rows, cheap.
+        const rows = db
+          .query(
+            `SELECT s.id, s.source, s.model, s.message_count,
+                    COALESCE(s.ended_at, s.started_at) AS last_ts,
+                    (SELECT m.content FROM messages m
+                      WHERE m.session_id = s.id AND m.role = 'user'
+                        AND m.content IS NOT NULL AND m.content != ''
+                      ORDER BY m.timestamp ASC LIMIT 1) AS first_user
+             FROM sessions s
+             ORDER BY last_ts DESC
+             LIMIT 8`,
+          )
+          .all() as Array<{
+          id: string;
+          source: string | null;
+          model: string | null;
+          message_count: number | null;
+          last_ts: number | null;
+          first_user: string | null;
+        }>;
+        for (const r of rows) {
+          const ms = Math.round((r.last_ts ?? 0) * 1000);
+          if (!lastActiveMs || ms > lastActiveMs) lastActiveMs = ms;
+          recentSessions.push({
+            id: String(r.id),
+            firstUserMessage: (r.first_user ?? "").trim().slice(0, 140) || null,
+            model: r.model ?? null,
+            platform: r.source ?? null,
+            lastUpdatedMs: ms,
+            lastUpdatedAgo: humanAgo(Date.now() - ms),
+            messageCount: r.message_count ?? 0,
+          });
+        }
+      } finally {
+        db.close();
+      }
+    }
+  } catch {
+    /* sqlite missing/corrupt — the JSON fallback below still runs */
+  }
+  try {
     const sessionsDir = join(hermesHome, "sessions");
-    if (existsSync(sessionsDir)) {
+    if (recentSessions.length === 0 && existsSync(sessionsDir)) {
       const all = (await readdir(sessionsDir)).filter((f) => f.endsWith(".json"));
       sessionCount = all.length;
       const withMtime = all
@@ -3035,6 +3289,29 @@ async function main() {
     healthStatus: dreamHealthStatus,
     fixHint: dreamFixHint,
   };
+  // Per-prescription lifecycle from state.json: `status` lets the UI hide
+  // items the operator already skipped/completed (kept hidden across
+  // refreshes — /__dream_action persists the verdict), `ageDays` powers the
+  // "recurring · seen Nd" chip so a prescription that keeps coming back
+  // reads differently from a fresh one.
+  try {
+    const dreamStatePath = join(HOME, ".claude-os", "dreams", "state.json");
+    const rx = Array.isArray((dream as any).prescriptions) ? (dream as any).prescriptions : [];
+    if (rx.length > 0 && existsSync(dreamStatePath)) {
+      const st = JSON.parse(readFileSync(dreamStatePath, "utf-8"));
+      for (const p of rx) {
+        const a = p?.id ? st?.actions?.[p.id] : undefined;
+        if (!a) continue;
+        if (typeof a.status === "string") p.status = a.status;
+        const first = Date.parse(a.firstSeenAt ?? "");
+        if (Number.isFinite(first)) {
+          p.ageDays = Math.max(0, Math.floor((Date.now() - first) / 86_400_000));
+        }
+      }
+    }
+  } catch {
+    /* state.json unreadable — prescriptions render without lifecycle */
+  }
   console.log(`[aggregate] dream health: ${dreamHealthStatus}${dreamFixHint ? ` — ${dreamFixHint}` : ""}`);
 
   // Hermes — snapshot the agent's filesystem so the homepage, Dream, and

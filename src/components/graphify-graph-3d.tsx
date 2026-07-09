@@ -20,7 +20,7 @@ export type GLink = {
 };
 export type GraphData = { nodes: GNode[]; links: GLink[] };
 
-const PALETTE = [
+export const PALETTE = [
   "#3ddc97", "#60a5fa", "#a78bfa", "#f472b6", "#f5b14c", "#7be0c8",
   "#ef5a5a", "#e6ebf2", "#fbbf24", "#34d399", "#818cf8", "#fb7185",
   "#22d3ee", "#c084fc", "#4ade80", "#fda4af",
@@ -38,7 +38,7 @@ const esc = (s: string) =>
   );
 const idOf = (v: any) => (typeof v === "object" && v ? v.id : v);
 const shortPath = (p: string) => String(p).replace(/^.*\/(?=[^/]+\/[^/]+$)/, "…/");
-const colorForCommunity = (community: number, accent: string) =>
+export const colorForCommunity = (community: number, accent: string) =>
   community === 0 ? accent : PALETTE[community % PALETTE.length];
 
 const DIM = 0.32;
@@ -51,6 +51,11 @@ export function GraphifyGraph3D({
   onSelect,
   onMeta,
   pinnedId = null,
+  tooltip,
+  hideLegend = false,
+  onBackground,
+  spread = 1,
+  bloomStrength = 0.78,
 }: {
   graph: GraphData;
   accent?: string;
@@ -59,6 +64,20 @@ export function GraphifyGraph3D({
   onSelect?: (n: any) => void;
   onMeta?: (m: { shown: number; total: number; capped: boolean }) => void;
   pinnedId?: string | null;
+  /** Custom hover-tooltip HTML — defaults to the graphify file/cluster card. */
+  tooltip?: (n: any) => string;
+  /** Hide the EXTRACTED/INFERRED legend (for callers with their own key). */
+  hideLegend?: boolean;
+  /** Fired when the user clicks empty space (useful to release a pin). */
+  onBackground?: () => void;
+  /**
+   * Layout scale multiplier. 1 = the dense code-graph tuning; raise it
+   * (~2.5) for small graphs (e.g. a personal vault) so nodes separate
+   * enough to read instead of collapsing into one bloomed ball.
+   */
+  spread?: number;
+  /** Bloom pass strength — lower it for small bright graphs (default 0.78). */
+  bloomStrength?: number;
 }) {
   const [Graph, setGraph] = useState<ForceGraphModule | null>(null);
   const [THREE, setTHREE] = useState<ThreeModule | null>(null);
@@ -276,11 +295,17 @@ export function GraphifyGraph3D({
       try {
         const composer = fg.postProcessingComposer();
         if (!scene.userData.__bloom) {
-          const bp = new BloomPass(new THREE.Vector2(sizeRef.current.w, sizeRef.current.h), 0.78, 0.64, 0.3);
+          const bp = new BloomPass(
+            new THREE.Vector2(sizeRef.current.w, sizeRef.current.h),
+            bloomStrength,
+            0.64,
+            0.3,
+          );
           composer.addPass(bp);
           scene.userData.__bloom = bp;
         } else {
           scene.userData.__bloom.setSize(sizeRef.current.w, sizeRef.current.h);
+          scene.userData.__bloom.strength = bloomStrength;
         }
       } catch {}
     }
@@ -356,7 +381,7 @@ export function GraphifyGraph3D({
     const numC = comms.length || 1;
     // Smaller anchor radius → communities sit closer to the centre, so the
     // graph is a filled ball (links cross the middle) not a hollow shell.
-    const R = Math.min(300, 60 + numC * 6);
+    const R = Math.min(320, (60 + numC * 6) * spread);
     const anchor = new Map<number, { x: number; y: number; z: number }>();
     comms.forEach((c, i) => {
       const t = (i + 0.5) / numC;
@@ -370,13 +395,16 @@ export function GraphifyGraph3D({
     });
     try {
       const charge = fg.d3Force("charge");
-      if (charge) charge.strength(embedded ? -22 : -30);
+      if (charge) charge.strength((embedded ? -22 : -30) * spread);
       // Stronger link attraction → connected files pull TOGETHER, so the
       // lines between them are visible and the graph reads as a connected
       // web instead of nodes floating alone. Shorter distances = denser,
       // fuller body (fills the hollow middle).
       const link = fg.d3Force("link");
-      if (link) link.distance((l: any) => (l.confidence === "EXTRACTED" ? 12 : 26)).strength(0.7);
+      if (link)
+        link
+          .distance((l: any) => (l.confidence === "EXTRACTED" ? 12 : 26) * spread)
+          .strength(0.7);
       // A weak pull toward the GRAPH CENTRE (origin) so detached / tiny
       // communities don't fly out to the shell and leave the middle empty
       // — keeps the whole thing a cohesive ball, not a hollow sphere.
@@ -405,7 +433,7 @@ export function GraphifyGraph3D({
       const layoutReady = gd?.nodes?.length ? gd.nodes[0].x != null : false;
       if (layoutReady && !pinnedIdRef.current) fg.d3ReheatSimulation?.();
     } catch {}
-  }, [Graph, data, embedded]);
+  }, [Graph, data, embedded, spread]);
 
   // Fly the camera to a node (god-node click). Defers if coords aren't laid out
   // yet (flushed in fitCamera/onEngineStop) and freezes the target so a
@@ -421,7 +449,9 @@ export function GraphifyGraph3D({
     n.fx = n.x;
     n.fy = n.y;
     n.fz = n.z;
-    const d = 130;
+    // Back off further on spread-out graphs so the fly-to frames the node's
+    // neighbourhood instead of parking inside its bloom halo.
+    const d = 130 * Math.min(2, Math.max(1, spread * 0.75));
     try {
       fg.cameraPosition({ x: n.x + d, y: n.y + d * 0.4, z: n.z + d }, { x: n.x, y: n.y, z: n.z }, 900);
     } catch {}
@@ -473,9 +503,19 @@ export function GraphifyGraph3D({
       const group = new THREE.Group();
       const lit = isLit(n.id);
       const color = colorForCommunity(n.community, accent);
-      const r = n.god ? 6 + Math.min(8, n.degree * 0.5) : 2.4 + Math.min(5, n.degree * 0.4);
+      // "Airy" (spread) graphs are read up close — cooler emissives and
+      // gentler size scaling so hub nodes stay coloured spheres instead of
+      // saturating into white bloom balls.
+      const airy = spread > 1.5;
+      const r = n.god
+        ? airy
+          ? 4.5 + Math.min(5, n.degree * 0.18)
+          : 6 + Math.min(8, n.degree * 0.5)
+        : airy
+          ? 2.2 + Math.min(3.5, n.degree * 0.22)
+          : 2.4 + Math.min(5, n.degree * 0.4);
       const mat = new THREE.MeshStandardMaterial({
-        color, emissive: color, emissiveIntensity: n.god ? 2.2 : 0.8,
+        color, emissive: color, emissiveIntensity: n.god ? (airy ? 1.1 : 2.2) : airy ? 0.65 : 0.8,
         roughness: 0.35, metalness: 0.1, transparent: true, opacity: lit ? 1 : DIM,
       });
       const mats: { m: any; base: number }[] = [{ m: mat, base: 1 }];
@@ -486,11 +526,12 @@ export function GraphifyGraph3D({
       else geom = new THREE.SphereGeometry(r, n.god ? 28 : 16, n.god ? 28 : 16);
       group.add(new THREE.Mesh(geom, mat));
       if (n.god) {
+        const haloBase = airy ? 0.09 : 0.16;
         const haloMat = new THREE.MeshBasicMaterial({
-          color, transparent: true, opacity: (lit ? 1 : DIM) * 0.16, side: THREE.BackSide,
+          color, transparent: true, opacity: (lit ? 1 : DIM) * haloBase, side: THREE.BackSide,
         });
         group.add(new THREE.Mesh(new THREE.SphereGeometry(r * 1.6, 20, 20), haloMat));
-        mats.push({ m: haloMat, base: 0.16 });
+        mats.push({ m: haloMat, base: haloBase });
         group.userData.__pulse = true;
         group.userData.__seed = (n.id.length * 7 + n.community) % 100;
       }
@@ -498,7 +539,7 @@ export function GraphifyGraph3D({
       return group;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [accent, THREE],
+    [accent, THREE, spread],
   );
 
   // Fly to a node when it's pinned (god-node click); release any prior freeze.
@@ -535,7 +576,9 @@ export function GraphifyGraph3D({
           onEngineStop={fitCamera}
           nodeRelSize={5}
           nodeLabel={(n: any) =>
-            `<div style="font:500 11px ui-sans-serif,system-ui;padding:8px 11px;background:rgba(11,14,19,0.95);border:1px solid #2a2f3a;border-radius:10px;color:#fff;max-width:300px;box-shadow:0 10px 28px rgba(0,0,0,.5)">
+            tooltip
+              ? tooltip(n)
+              : `<div style="font:500 11px ui-sans-serif,system-ui;padding:8px 11px;background:rgba(11,14,19,0.95);border:1px solid #2a2f3a;border-radius:10px;color:#fff;max-width:300px;box-shadow:0 10px 28px rgba(0,0,0,.5)">
                <div style="font-weight:600">${esc(n.name)}</div>
                <div style="color:#9aa3b0;margin-top:3px;font-size:10px">${esc(n.fileType)} · cluster ${n.community} · ${n.degree} links${n.god ? " · ★ god node" : ""}</div>
                ${n.sourceFile ? `<div style="color:#c7cdd6;margin-top:2px;font-size:10px;font-style:italic">${esc(shortPath(n.sourceFile))}</div>` : ""}
@@ -560,6 +603,7 @@ export function GraphifyGraph3D({
           linkCurvature={0.08}
           onNodeHover={(n: any) => setHoverId(n?.id ?? null)}
           onNodeClick={(n: any) => onSelect?.(n)}
+          onBackgroundClick={() => onBackground?.()}
           enableNodeDrag={!embedded}
         />
       ) : (
@@ -605,7 +649,7 @@ export function GraphifyGraph3D({
         </div>
       )}
 
-      {!embedded && (
+      {!embedded && !hideLegend && (
         <div className="absolute bottom-3 left-3 flex flex-wrap gap-3 rounded-lg border border-border/70 bg-background/70 backdrop-blur px-3 py-2 text-[10px] text-muted-foreground pointer-events-none">
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-3 rounded-full" style={{ background: "rgba(120,224,200,0.85)" }} />
