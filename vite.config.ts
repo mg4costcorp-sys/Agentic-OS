@@ -16,6 +16,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { readdir as readdirAsync, readFile as readFileAsync, stat as statAsync } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import yaml from "js-yaml";
@@ -75,6 +76,7 @@ function resolveCliBin(name: string): string | undefined {
 //
 // Models are tiered so cheap/silly tasks use cheap/fast models and reasoning
 // tasks get top-tier models:
+//   claude-fable-5     — frontier reasoning w/ effort dial (low→max), $$$$
 //   gpt-5.5            — Hermes default, capable mid-tier
 //   claude-opus-4.8    — top reasoning, slow, $$$
 //   claude-sonnet-4.6  — top execution, fast, $$
@@ -93,7 +95,7 @@ const PANTHEON_SEEDS: Array<{
   description: string;
   avatar: string;
   default: boolean;
-  model: { provider: string; name: string };
+  model: { provider: string; name: string; effort?: string };
   behavior: { tone: string; system_prompt: string };
   skills: string[];
   tools: string[];
@@ -210,7 +212,11 @@ const PANTHEON_SEEDS: Array<{
       "For wrestling with ambiguous problems. Pulls on threads, questions premises, and surfaces the meta question behind the question. Slower than the others because depth costs tokens. Best when you genuinely do not know what you are trying to figure out before you have spent some time thinking.",
     avatar: "assets/philosopher.png",
     default: true,
-    model: { provider: "anthropic", name: "claude-opus-4.8" },
+    // Fable 5 with the dial at max — this is the persona whose whole job
+    // is depth, so it gets the frontier model with no reasoning ceiling.
+    // Routed via OpenRouter (not the anthropic provider) so it runs off the
+    // user's OpenRouter key without touching Claude Code's OAuth session.
+    model: { provider: "openrouter", name: "anthropic/claude-fable-5", effort: "max" },
     behavior: {
       tone: "patient, socratic, layered",
       system_prompt:
@@ -310,6 +316,144 @@ function sendCached(key: string, res: any): boolean {
 }
 function storeCached(key: string, ttlMs: number, body: string): void {
   responseCache.set(key, { expires: Date.now() + ttlMs, body });
+}
+
+// Timestamp embedded in a Hermes session filename. Both formats lead with a
+// numeric epoch: "session_<ts>_<id>.json" and "<ts>_<id>.jsonl". Used to pick
+// the newest candidates cheaply, without stat()ing every file. Returns 0 when
+// no timestamp is parseable (those sort last and are only kept if there's room).
+function sessionNameTs(name: string): number {
+  const m = name.match(/(\d{10,})/);
+  return m ? Number(m[1]) : 0;
+}
+
+// Non-blocking, doubly-bounded scan of a Hermes sessions directory.
+//
+// This is the fix for the cold-start hang: the previous implementation did a
+// synchronous readdirSync + a statSync per entry directly inside the request
+// handler. On an account whose ~/.hermes/sessions has accumulated hundreds of
+// thousands of session_*/request_dump_* files, that scandir pins the dev
+// server's single event loop for tens of seconds, so EVERY route (even "/")
+// blocks until it finishes.
+//
+// Here readdir + stat run via fs/promises on the libuv threadpool, so the main
+// event loop stays free. Work is bounded twice: we rank candidates by the
+// timestamp already in the filename (no I/O) and stat() only the newest
+// STAT_CAP of them, then return at most `limit` rows — both independent of how
+// large the directory has grown.
+// Read a single var from ~/.hermes/.env (Hermes' canonical key store).
+// Returns "" when the file or var is absent. Tolerant of `export`, quotes,
+// and inline comments so it matches whatever the user / Hermes wrote.
+function readHermesEnv(name: string): string {
+  try {
+    const p = join(homedir(), ".hermes", ".env");
+    if (!existsSync(p)) return "";
+    const text = readFileSync(p, "utf-8");
+    const m = text.match(
+      new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*(.+)\\s*$`, "m"),
+    );
+    if (!m) return "";
+    let v = m[1].trim();
+    // Strip surrounding quotes; drop an inline # comment on unquoted values.
+    if (/^".*"$/.test(v) || /^'.*'$/.test(v)) v = v.slice(1, -1);
+    else v = v.replace(/\s+#.*$/, "").trim();
+    return v;
+  } catch {
+    return "";
+  }
+}
+
+// Upsert a var into ~/.hermes/.env, creating the file (0600) if needed.
+// Persists secrets the dashboard collects (e.g. the voice OPENAI_API_KEY)
+// so they survive dev-server restarts and aren't tied to per-port browser
+// localStorage. Rewrites an existing line in place; appends otherwise.
+function writeHermesEnv(name: string, value: string): boolean {
+  try {
+    const dir = join(homedir(), ".hermes");
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, ".env");
+    // Guard against a pasted value carrying a newline — an unescaped one
+    // would split into a rogue extra env line (and readHermesEnv would then
+    // return only the truncated first segment). Take the first physical line.
+    const safeValue = String(value).replace(/[\r\n].*$/s, "").trim();
+    const line = `${name}=${safeValue}`;
+    let text = existsSync(p) ? readFileSync(p, "utf-8") : "";
+    const re = new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=.*$`, "m");
+    if (re.test(text)) text = text.replace(re, () => line);
+    else text = text.replace(/\s*$/, "") + (text.trim() ? "\n" : "") + line + "\n";
+    writeFileSync(p, text, { encoding: "utf-8", mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Query Hermes' sqlite session store (~/.hermes/state.db) read-only via the
+// system `sqlite3` CLI — Hermes 0.17+ records every chat here instead of
+// flushing per-session .jsonl files. -readonly + -json keep it side-effect
+// free and parseable; the 5s timeout + callers' response caching keep the
+// (synchronous) call from ever pinning the event loop for long. Returns null
+// when sqlite3 or the db is unavailable so callers fall back to legacy files.
+function queryHermesStateDb(sql: string): Array<Record<string, any>> | null {
+  try {
+    const dbPath = join(homedir(), ".hermes", "state.db");
+    if (!existsSync(dbPath)) return null;
+    const raw = execFileSync("sqlite3", ["-readonly", "-json", dbPath, sql], {
+      encoding: "utf-8",
+      timeout: 5000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    if (!raw.trim()) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function listRecentSessions(
+  sessionsDir: string,
+  limit: number,
+): Promise<Array<{ name: string; mtime: number }>> {
+  const STAT_CAP = Math.max(limit * 3, 600);
+  let names: string[];
+  try {
+    names = await readdirAsync(sessionsDir);
+  } catch {
+    return []; // dir missing / unreadable — treat as no sessions
+  }
+  const candidates = names
+    // Two real session formats live here:
+    //   • session_<timestamp>_<id>.json  (current)   • <timestamp>_<id>.jsonl (older)
+    // Everything else is noise that must NOT be treated as a session:
+    //   • sessions.json (master index)  • request_dump_*.json (per-request error
+    //     dumps)  • .DS_Store / .lock / dotfiles
+    .filter(
+      (f) =>
+        (f.endsWith(".json") || f.endsWith(".jsonl")) &&
+        f !== "sessions.json" &&
+        !f.startsWith("request_dump_") &&
+        !f.startsWith("."),
+    )
+    // Rank by the filename timestamp (cheap, no I/O) and keep only the newest
+    // STAT_CAP, so the stat() burst below is bounded regardless of dir size.
+    .sort((a, b) => sessionNameTs(b) - sessionNameTs(a))
+    .slice(0, STAT_CAP);
+  const stated = await Promise.all(
+    candidates.map(async (name) => {
+      try {
+        const st = await statAsync(join(sessionsDir, name));
+        return { name, mtime: st.mtimeMs };
+      } catch {
+        return null; // vanished between readdir and stat — skip
+      }
+    }),
+  );
+  return stated
+    .filter((x): x is { name: string; mtime: number } => x !== null)
+    // Exact recency ordering from real mtimes, then the hard `limit` cap.
+    .sort((a, b) => b.mtime - a.mtime)
+    .slice(0, limit);
 }
 
 // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
@@ -431,6 +575,41 @@ export default defineConfig({
           // request.  This replaces the static `import liveData from "…"`
           // pattern so the browser always gets the latest aggregator output
           // without a server restart.
+          // Overlay the freshest per-prescription lifecycle from
+          // ~/.claude-os/dreams/state.json onto the aggregated dream block.
+          // The aggregator bakes status/ageDays in at aggregate time, but a
+          // Skip/Done click writes state.json seconds later — without this
+          // serve-time merge the verdict wouldn't stick until the next
+          // aggregate run (daily), so dismissed cards would bounce back on
+          // every reload in between.
+          const overlayDreamLifecycle = (raw: string): string => {
+            try {
+              const statePath = join(homedir(), ".claude-os", "dreams", "state.json");
+              if (!existsSync(statePath)) return raw;
+              const data = JSON.parse(raw);
+              const rx = data?.dream?.prescriptions;
+              if (!Array.isArray(rx) || rx.length === 0) return raw;
+              const st = JSON.parse(readFileSync(statePath, "utf-8"));
+              let touched = false;
+              for (const p of rx) {
+                const a = p?.id ? st?.actions?.[p.id] : undefined;
+                if (!a) continue;
+                if (typeof a.status === "string" && p.status !== a.status) {
+                  p.status = a.status;
+                  touched = true;
+                }
+                const first = Date.parse(a.firstSeenAt ?? "");
+                if (Number.isFinite(first)) {
+                  p.ageDays = Math.max(0, Math.floor((Date.now() - first) / 86_400_000));
+                  touched = true;
+                }
+              }
+              return touched ? JSON.stringify(data) : raw;
+            } catch {
+              return raw; // state unreadable — serve the file as-is
+            }
+          };
+
           server.middlewares.use("/__live-data", (req, res, next) => {
             if (req.method !== "GET") return next();
             try {
@@ -438,7 +617,7 @@ export default defineConfig({
               const raw = readFileSync(filePath, "utf-8");
               res.setHeader("Content-Type", "application/json");
               res.setHeader("Cache-Control", "no-store");
-              res.end(raw);
+              res.end(overlayDreamLifecycle(raw));
             } catch {
               // Fall back to example file on fresh clones
               try {
@@ -1261,6 +1440,11 @@ export default defineConfig({
             if (graph) args.push("-s", "graphify");
             if (model) args.push("-m", model);
             if (provider) args.push("--provider", provider);
+            // Ministry (Mixture-of-Agents) turns: run verbose so each expert
+            // reference streams its FULL text. Without -v, Hermes' CLI caps
+            // every reference/thinking preview at 5 lines and prints
+            // "... (N more lines)" — the dashboard wants the whole answer.
+            if (provider === "moa") args.push("-v");
             // Strip any inherited PYTHONPATH/PYTHONHOME so the venv's own
             // site-packages resolution wins. Inherited values from a parent
             // shell can shadow Hermes' bundled deps and cause silent imports
@@ -1282,6 +1466,13 @@ export default defineConfig({
                 TERM: "xterm-256color",
                 COLUMNS: "180",
                 LINES: "60",
+                // Ministry reliability: Hermes' MoA reference display events
+                // are best-effort TUI callbacks that silently drop in
+                // headless runs. This flag activates a local patch in
+                // hermes-agent (agent_init._moa_reference_relay) that echoes
+                // every expert's output to stdout deterministically, so the
+                // chat ALWAYS shows the ensemble. No-op on unpatched Hermes.
+                HERMES_MOA_ECHO: "1",
               },
             });
 
@@ -1295,10 +1486,29 @@ export default defineConfig({
             //      the answer is on stdout, the process spins forever at
             //      100% CPU. Once we see SOME output, an 8s silence means
             //      it's done and we can SIGTERM cleanly.
-            const FIRST_OUTPUT_TIMEOUT_MS = 120_000; // 2 min cold-start grace
-            const POST_OUTPUT_IDLE_MS = 8_000; // strict after streaming starts
+            // In -Q quiet mode Hermes emits NOTHING until the final answer,
+            // so "first output" arrives only when the whole run is done. A
+            // flat 2-minute ceiling therefore executes any agentic turn that
+            // legitimately thinks/runs tools for longer (observed: the
+            // "read all my sessions and recommend skills" prompt dies at
+            // exactly 120s with exit 130 = Hermes trapping our SIGTERM).
+            // Budget by mode: yolo turns are explicitly agentic → 10 min.
+            const FIRST_OUTPUT_TIMEOUT_MS = yolo ? 600_000 : 120_000;
+            const POST_OUTPUT_IDLE_MS = 8_000; // strict once the run is over
+            // Mid-run output gaps (between tool batches) can exceed 8s on
+            // agentic turns — don't kill those. Hermes prints
+            // "session_id: …" to stderr as its end-of-run marker; once seen,
+            // snap back to the strict 8s so the curses-hang cleanup stays fast.
+            // Ministry (moa) turns get the biggest budget: each of the
+            // reference models + the aggregator can legitimately think for
+            // minutes with zero output — the observed exit-130s were this
+            // watchdog interrupting them mid-run (Hermes maps SIGTERM to
+            // KeyboardInterrupt → exit 130).
+            const MID_RUN_IDLE_MS =
+              provider === "moa" ? 600_000 : yolo ? 300_000 : 8_000;
             let watchdog: NodeJS.Timeout | null = null;
             let receivedAnyOutput = false;
+            let runFinished = false;
             const setIdle = (ms: number) => {
               if (watchdog) clearTimeout(watchdog);
               watchdog = setTimeout(() => {
@@ -1317,17 +1527,25 @@ export default defineConfig({
             child.stdout.on("data", (buf: Buffer) => {
               receivedAnyOutput = true;
               sendEvent("chunk", buf.toString("utf-8"));
-              setIdle(POST_OUTPUT_IDLE_MS);
+              setIdle(runFinished ? POST_OUTPUT_IDLE_MS : MID_RUN_IDLE_MS);
             });
             child.stderr.on("data", (buf: Buffer) => {
               // Hermes pipes status into stderr; keep the user's chat
               // bubble clean by routing stderr to an "info" event the
               // client can choose to display dimly.
               receivedAnyOutput = true;
-              sendEvent("info", buf.toString("utf-8"));
-              setIdle(POST_OUTPUT_IDLE_MS);
+              const text = buf.toString("utf-8");
+              if (/session_id:/.test(text)) runFinished = true;
+              // Insurance: if reference/thinking output arrives AFTER a
+              // session_id sighting, the run is clearly still going (e.g. a
+              // continuation session) — go back to the generous idle.
+              else if (runFinished && /◇\s*Reference|\[thinking\]/.test(text))
+                runFinished = false;
+              sendEvent("info", text);
+              setIdle(runFinished ? POST_OUTPUT_IDLE_MS : MID_RUN_IDLE_MS);
             });
             child.on("error", (err) => {
+              clearInterval(heartbeat); // else the 15s keepalive writes on an ended response forever
               if (watchdog) clearTimeout(watchdog);
               sendEvent("error", String(err.message || err));
               res.end();
@@ -1348,7 +1566,7 @@ export default defineConfig({
               } else if (signal === "SIGTERM" || signal === "SIGKILL") {
                 sendEvent(
                   "error",
-                  "Hermes didn't respond in 2 minutes. Check ~/.hermes/.env has provider credentials and run `hermes gateway restart`.",
+                  `Hermes didn't respond in ${Math.round(FIRST_OUTPUT_TIMEOUT_MS / 60_000)} minutes. Check ~/.hermes/.env has provider credentials and run \`hermes gateway restart\`.`,
                 );
               } else {
                 sendEvent("error", `hermes exited with code ${code ?? signal}`);
@@ -2323,7 +2541,17 @@ export default defineConfig({
                     : seed.description,
                 model:
                   model && model.provider && model.name
-                    ? { provider: model.provider, name: model.name }
+                    ? {
+                        provider: model.provider,
+                        name: model.name,
+                        // Reasoning-effort dial — whitelist the value so
+                        // junk never lands in the YAML.
+                        ...(["low", "medium", "high", "xhigh", "max"].includes(
+                          model.effort,
+                        )
+                          ? { effort: model.effort }
+                          : {}),
+                      }
                     : seed.model,
                 behavior:
                   typeof prompt === "string" && prompt.trim()
@@ -2438,6 +2666,14 @@ export default defineConfig({
                 const merged = { ...existing, ...patch };
                 if (patch.model && existing.model)
                   merged.model = { ...existing.model, ...patch.model };
+                // Effort dial hygiene: effort: null means "remove the key"
+                // (model switched to one without a reasoning-effort knob),
+                // and anything outside the known stops is dropped too.
+                if (merged.model && "effort" in merged.model) {
+                  const validEffort = ["low", "medium", "high", "xhigh", "max"];
+                  if (!validEffort.includes(merged.model.effort))
+                    delete merged.model.effort;
+                }
                 if (patch.behavior && existing.behavior)
                   merged.behavior = { ...existing.behavior, ...patch.behavior };
                 const out = yaml.dump(merged, {
@@ -2482,9 +2718,21 @@ export default defineConfig({
               try { const u = new URL(base); baseOk = !u.username && !u.password && ((u.protocol === "https:" && u.hostname === "api.openai.com") || u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1" || u.hostname === "[::1]"); } catch { /* invalid */ }
               if (!baseOk) { res.statusCode = 400; res.end(JSON.stringify({ error: "base_not_allowed" })); return; }
             }
+            // Durable key: a freshly-entered key is persisted to ~/.hermes/.env
+            // FIRST — before any early return — so it's saved even when the
+            // engine already happens to be keyed (e.g. from a shell export).
+            // This is what stops voice "forgetting" the key across dev-server
+            // restarts and across dashboard ports (localStorage is per-port).
+            if (key) writeHermesEnv("OPENAI_API_KEY", key);
             const health = async () => { try { const r = await fetch("http://127.0.0.1:8099/api/health"); if (r.ok) return (await r.json()) as any; } catch { /* down */ } return null; };
             let h = await health();
             if (h && h.keyed) { res.end(JSON.stringify({ ok: true, already: true, keyed: true })); return; }
+            // No key supplied and engine not keyed → fall back to the saved
+            // one, so re-opening voice on ANY port after ANY restart just works.
+            if (!key && !base) {
+              const saved = readHermesEnv("OPENAI_API_KEY");
+              if (saved) key = saved;
+            }
             if (!key && !base) { res.statusCode = 400; res.end(JSON.stringify({ error: "no_key" })); return; }
             try {
               if (voiceChild && voiceChild.exitCode === null) { try { voiceChild.kill(); } catch { /* ignore */ } }
@@ -2587,8 +2835,8 @@ export default defineConfig({
             // Comprehensive catalog reflecting what Hermes can integrate
             // with as of v0.13. Groups by provider (OpenAI / Anthropic /
             // Google / OpenRouter / xAI / Mistral / Ollama / Cohere).
-            // Tiers: top (frontier), mid (default), cheap (fast/small),
-            // free (no-cost tier).
+            // Tiers: frontier (Mythos-class, effort dial), top, mid
+            // (default), cheap (fast/small), free (no-cost tier).
             const catalog = [
               {
                 provider: "openai",
@@ -2602,7 +2850,7 @@ export default defineConfig({
               {
                 provider: "anthropic",
                 models: [
-                  { name: "claude-fable-5", tier: "top" },
+                  { name: "claude-fable-5", tier: "frontier" },
                   { name: "claude-opus-4.8", tier: "top" },
                   { name: "claude-sonnet-4.6", tier: "mid" },
                   { name: "claude-haiku-4.5", tier: "cheap" },
@@ -2621,6 +2869,7 @@ export default defineConfig({
                 // best, verified against the live OpenRouter catalog (2026-06).
                 provider: "openrouter",
                 models: [
+                  { name: "anthropic/claude-fable-5", tier: "frontier" }, // verified live 2026-07-04 · 1M ctx · $10/$50
                   { name: "z-ai/glm-5.2", tier: "top" }, // best GLM — 1M ctx
                   { name: "anthropic/claude-opus-4.8", tier: "top" },
                   { name: "anthropic/claude-sonnet-5", tier: "top" }, // launched 2026-06-30 · 1M ctx · $2/$10
@@ -2717,6 +2966,13 @@ export default defineConfig({
                       references: Array.isArray(p?.reference_models)
                         ? p.reference_models.length
                         : 0,
+                      // Full expert model names so the chat can credit the
+                      // whole ensemble under a Ministry reply.
+                      referenceModels: Array.isArray(p?.reference_models)
+                        ? p.reference_models
+                            .map((r: any) => String(r?.model ?? ""))
+                            .filter(Boolean)
+                        : [],
                       aggregator: p?.aggregator?.model
                         ? String(p.aggregator.model)
                         : undefined,
@@ -2735,6 +2991,13 @@ export default defineConfig({
             // detected, the UI falls back to showing everything.)
             const configured = new Set<string>();
             if (defaultModel?.provider) configured.add(defaultModel.provider.toLowerCase());
+            // NOTE: deliberately NOT auto-unlocking the anthropic group off
+            // Claude Code's OAuth credentials — Hermes borrowing that token
+            // can invalidate Claude Code's own session (single-use refresh
+            // tokens; same failure mode as the Hermes↔Codex OAuth conflict).
+            // Claude models route through OpenRouter instead
+            // (anthropic/claude-fable-5 etc.); the anthropic group only
+            // appears when the user sets a real ANTHROPIC_API_KEY.
             try {
               const authPath = join(homedir(), ".hermes", "auth.json");
               if (existsSync(authPath)) {
@@ -2773,11 +3036,18 @@ export default defineConfig({
             } catch {
               /* ignore */
             }
+            // Hermes' global reasoning-effort knob (agent.reasoning_effort in
+            // config.yaml) — surfaced so the chat composer can render the
+            // effort dial with the real current value.
+            let reasoningEffort = "";
             try {
               const cfg = yaml.load(
                 readFileSync(join(homedir(), ".hermes", "config.yaml"), "utf-8"),
               ) as any;
               for (const k of Object.keys(cfg?.providers ?? {})) configured.add(k.toLowerCase());
+              reasoningEffort = String(cfg?.agent?.reasoning_effort ?? "")
+                .trim()
+                .toLowerCase();
             } catch {
               /* ignore */
             }
@@ -2789,8 +3059,79 @@ export default defineConfig({
                 catalog,
                 mixtures,
                 configured: Array.from(configured),
+                reasoningEffort,
               }),
             );
+          });
+
+          // POST /__hermes_effort — set Hermes' global reasoning effort
+          // (agent.reasoning_effort in ~/.hermes/config.yaml). Hermes reads
+          // config fresh on every `hermes chat -Q` invocation, so the new
+          // level applies from the next message. The write is a surgical
+          // line replacement inside the `agent:` block — never a full YAML
+          // re-dump, so the rest of the user's config is untouched byte-for-
+          // byte. Token-gated + loopback only.
+          server.middlewares.use("/__hermes_effort", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "loopback only" }));
+              return;
+            }
+            const token = req.headers["x-claude-os-token"];
+            if (token !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "bad token" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => (body += c));
+            req.on("end", () => {
+              let effort: string;
+              try {
+                effort = String(JSON.parse(body)?.effort ?? "").trim().toLowerCase();
+              } catch {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: "invalid json" }));
+                return;
+              }
+              // Hermes' canonical levels (see hermes_cli/main.py).
+              if (!["minimal", "low", "medium", "high", "xhigh"].includes(effort)) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: "unknown effort level" }));
+                return;
+              }
+              try {
+                const cfgPath = join(homedir(), ".hermes", "config.yaml");
+                const text = readFileSync(cfgPath, "utf-8");
+                // Find the top-level `agent:` block and swap (or insert) its
+                // reasoning_effort line. Anchored to the block so the same
+                // key in other blocks (e.g. subagents) is never touched.
+                const block = text.match(/^agent:\n((?:[ \t]+.+\n)+)/m);
+                if (!block) throw new Error("no agent block in config.yaml");
+                let inner = block[1];
+                if (/^[ \t]+reasoning_effort:.*$/m.test(inner)) {
+                  inner = inner.replace(
+                    /^([ \t]+)reasoning_effort:.*$/m,
+                    `$1reasoning_effort: ${effort}`,
+                  );
+                } else {
+                  const indent = inner.match(/^([ \t]+)/)?.[1] ?? "  ";
+                  inner = `${indent}reasoning_effort: ${effort}\n` + inner;
+                }
+                // Replacer fn so `$` sequences in config values are literal.
+                writeFileSync(
+                  cfgPath,
+                  text.replace(block[0], () => `agent:\n${inner}`),
+                  "utf-8",
+                );
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ ok: true, effort }));
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: err?.message ?? "write failed" }));
+              }
+            });
           });
 
           // POST /__hermes_cmd — run a DETERMINISTIC, whitelisted Hermes
@@ -3107,7 +3448,7 @@ export default defineConfig({
           //                              without firing 4 endpoints.
           // Loopback only.
           // ────────────────────────────────────────────────────────────────
-          server.middlewares.use("/__hermes_memory", (req, res, next) => {
+          server.middlewares.use("/__hermes_memory", async (req, res, next) => {
             if (req.method !== "GET") return next();
             if (!isLoopback(req)) {
               res.statusCode = 403;
@@ -3215,15 +3556,17 @@ export default defineConfig({
               /* surface empty */
             }
 
-            // Quick counts for the readout
+            // Quick counts for the readout. sessions/ grows unbounded, so its
+            // readdir runs async (off the main event loop) — a synchronous scan
+            // here would pin the server on a cold start exactly like the sessions
+            // list did.
             let sessionCount = 0;
             try {
               const sd = join(hermesHome, "sessions");
-              if (existsSync(sd)) {
-                sessionCount = readdirSync(sd).filter((f) => f.endsWith(".json")).length;
-              }
+              const names = await readdirAsync(sd);
+              sessionCount = names.filter((f) => f.endsWith(".json")).length;
             } catch {
-              /* ignore */
+              /* missing / unreadable — leave 0 */
             }
             let skillCount = 0;
             try {
@@ -3272,13 +3615,18 @@ export default defineConfig({
           // ~/.hermes/sessions/*.json. Returns last 20 with model,
           // message count, system prompt preview, start/end timestamps.
           // Loopback only.
-          server.middlewares.use("/__hermes_sessions", (req, res, next) => {
+          server.middlewares.use("/__hermes_sessions", async (req, res, next) => {
             if (req.method !== "GET") return next();
             if (!isLoopback(req)) {
               res.statusCode = 403;
               res.end(JSON.stringify({ error: "loopback only" }));
               return;
             }
+            // 8s cache — the /agents/hermes ActivityCard refetches this on every
+            // mount and it's the heaviest read on the page. A cold hit computes
+            // once; concurrent mount requests then serve from memory instead of
+            // each re-scanning the sessions directory.
+            if (sendCached("hermes-sessions", res)) return;
             const sessionsDir = join(homedir(), ".hermes", "sessions");
             const out: Array<{
               id: string;
@@ -3290,39 +3638,17 @@ export default defineConfig({
               firstUserMessage: string | null;
             }> = [];
             try {
-              if (existsSync(sessionsDir)) {
-                const files = readdirSync(sessionsDir)
-                  // Two real session formats live here:
-                  //   • session_<timestamp>_<id>.json    (current format)
-                  //   • <timestamp>_<id>.jsonl           (older format)
-                  // Plus noise that must NOT be treated as sessions:
-                  //   • sessions.json                    (the master index)
-                  //   • request_dump_*.json              (per-request error
-                  //       dumps — diagnostic snapshots, not conversations.
-                  //       Previously polluted the visible list with all-
-                  //       null-field rows because they have no
-                  //       session_start / last_updated / messages.)
-                  //   • .DS_Store / .lock / dotfiles
-                  .filter(
-                    (f) =>
-                      (f.endsWith(".json") || f.endsWith(".jsonl")) &&
-                      f !== "sessions.json" &&
-                      !f.startsWith("request_dump_") &&
-                      !f.startsWith("."),
-                  )
-                  .map((name) => ({
-                    name,
-                    mtime: statSync(join(sessionsDir, name)).mtimeMs,
-                  }))
-                  .sort((a, b) => b.mtime - a.mtime)
-                  // Cap raised from 20 → 200. The /agents/hermes
-                  // ActivityCard builds a 7-day bar chart from these and
-                  // was silently truncating real activity at 20 items.
-                  // 200 covers ~3 weeks of heavy use comfortably.
-                  .slice(0, 200);
+              // Bounded + non-blocking (see listRecentSessions): readdir/stat run
+              // off the main event loop and only the newest candidates are
+              // stat()'d, so a sessions dir with hundreds of thousands of files
+              // can't pin the server on a cold start. The 200 cap feeds the
+              // ActivityCard's 7-day bar chart (~3 weeks of heavy use); older
+              // <ts>_<id>.jsonl files are included too.
+              const files = await listRecentSessions(sessionsDir, 200);
+              {
                 for (const f of files) {
                   try {
-                    const raw = readFileSync(join(sessionsDir, f.name), "utf-8");
+                    const raw = await readFileAsync(join(sessionsDir, f.name), "utf-8");
                     // JSON: parse normally. JSONL: only first line is the
                     // session_meta header we care about — peel it off.
                     const isJsonl = f.name.endsWith(".jsonl");
@@ -3390,7 +3716,7 @@ export default defineConfig({
             try {
               const indexPath = join(sessionsDir, "sessions.json");
               if (existsSync(indexPath)) {
-                const indexRaw = readFileSync(indexPath, "utf-8");
+                const indexRaw = await readFileAsync(indexPath, "utf-8");
                 const indexJson = JSON.parse(indexRaw);
                 const knownIds = new Set(out.map((s) => s.id));
                 for (const [_threadKey, info] of Object.entries(indexJson)) {
@@ -3421,16 +3747,97 @@ export default defineConfig({
             } catch {
               /* index unreadable — return file-only list */
             }
+            // ALSO ingest sessions from ~/.hermes/state.db — Hermes 0.17+
+            // stopped flushing per-session .jsonl files and records every
+            // chat (CLI + dashboard turns included) in sqlite instead.
+            // Without this read, everything after the migration was
+            // invisible to the sidebar. DB rows win over legacy files on
+            // id collision (they carry live message counts).
+            try {
+              const rows = queryHermesStateDb(
+                "SELECT s.id, s.model, s.source, s.message_count, s.started_at, s.ended_at, (SELECT m.content FROM messages m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.timestamp LIMIT 1) AS first_user FROM sessions s WHERE s.archived = 0 ORDER BY s.started_at DESC LIMIT 200",
+              );
+              if (rows) {
+                // DB rows win over legacy files on id collision — they carry
+                // the LIVE message_count / timestamps (an ongoing thread's
+                // flushed file is stale). So drop any legacy entry that the DB
+                // also has, and index the survivors for de-dup.
+                const dbIds = new Set(
+                  rows.map((r) => String(r.id ?? "")).filter(Boolean),
+                );
+                for (let k = out.length - 1; k >= 0; k--) {
+                  if (dbIds.has(out[k].id)) out.splice(k, 1);
+                }
+                const known = new Set(out.map((s) => s.id));
+                for (const r of rows) {
+                  const sid = String(r.id ?? "");
+                  if (!sid || known.has(sid)) continue;
+                  known.add(sid);
+                  // Multimodal user messages store content as a JSON array —
+                  // pull the first text part for the preview.
+                  let firstUser: string | null =
+                    typeof r.first_user === "string" ? r.first_user : null;
+                  if (firstUser && firstUser.trim().startsWith("[")) {
+                    try {
+                      const arr = JSON.parse(firstUser);
+                      const t = Array.isArray(arr)
+                        ? arr.find((c: any) => typeof c?.text === "string")
+                        : null;
+                      firstUser = t?.text ?? firstUser;
+                    } catch {
+                      /* keep raw */
+                    }
+                  }
+                  const toIso = (v: any) =>
+                    typeof v === "number" ? new Date(v * 1000).toISOString() : null;
+                  out.push({
+                    id: sid,
+                    model: r.model ?? null,
+                    platform: r.source ?? null,
+                    messageCount:
+                      typeof r.message_count === "number" ? r.message_count : 0,
+                    startedAt: toIso(r.started_at),
+                    lastUpdated: toIso(r.ended_at) ?? toIso(r.started_at),
+                    firstUserMessage:
+                      typeof firstUser === "string" ? firstUser.slice(0, 200) : null,
+                  });
+                }
+                out.sort((a, b) => {
+                  const at = a.lastUpdated || a.startedAt || "";
+                  const bt = b.lastUpdated || b.startedAt || "";
+                  return bt.localeCompare(at);
+                });
+              }
+            } catch {
+              /* state.db unreadable — return file-based list */
+            }
+            // Final de-dup by id (a session can surface from more than one
+            // source — legacy .json, legacy .jsonl, the sessions.json index).
+            // Keep the first occurrence, then sort newest-first so the sidebar
+            // never renders duplicate keys or a stale copy above a live one.
+            const seenIds = new Set<string>();
+            const deduped = out.filter((s) => {
+              if (!s.id || seenIds.has(s.id)) return false;
+              seenIds.add(s.id);
+              return true;
+            });
+            deduped.sort((a, b) => {
+              const at = a.lastUpdated || a.startedAt || "";
+              const bt = b.lastUpdated || b.startedAt || "";
+              return bt.localeCompare(at);
+            });
+            const body = JSON.stringify({ sessions: deduped });
+            storeCached("hermes-sessions", 8000, body);
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Cache-Control", "no-store");
-            res.end(JSON.stringify({ sessions: out }));
+            res.end(body);
           });
 
           // GET /__hermes_session?id=<session_id> — full message list for one
           // session, so the dashboard can render a Telegram-style sidebar:
           // click a thread, see its history. Loopback only. Returns the
           // session_id, model, platform, and full messages array.
-          server.middlewares.use("/__hermes_session", (req, res, next) => {
+          server.middlewares.use("/__hermes_session", async (req, res, next) => {
             if (req.method !== "GET") return next();
             if (!isLoopback(req)) {
               res.statusCode = 403;
@@ -3439,20 +3846,30 @@ export default defineConfig({
             }
             const url = new URL(req.url || "", "http://localhost");
             const id = url.searchParams.get("id");
-            if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) {
+            // Length-capped + charset-locked. The charset (no quotes) is what
+            // keeps the id safe to embed in the state.db SQL below — keep it
+            // strict; widening it (e.g. adding '.'/':') would open SQLi there.
+            if (!id || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
               res.statusCode = 400;
               res.end(JSON.stringify({ error: "invalid id" }));
               return;
             }
             const sessionsDir = join(homedir(), ".hermes", "sessions");
-            // Hermes session files include a timestamp prefix, so we search
-            // by suffix match. Bounded scan because we only ship 20 recent
-            // anyway, and the directory is the user's own.
+            // Hermes session files include a timestamp prefix, so we search by
+            // suffix match. readdir runs async (off the main event loop) — this
+            // scans the whole directory to find the match, so a synchronous read
+            // would block every route on a large sessions dir, same as the list.
             let match: string | null = null;
             try {
-              const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
+              const files = (await readdirAsync(sessionsDir)).filter((f) => f.endsWith(".json"));
+              // Match on the id as a whole FILENAME SEGMENT — never a loose
+              // substring. A bare `includes(id)` let a request for "abc" open
+              // "session_..._abcdef.json" (a different conversation). Accept
+              // only: exact name, exact stem, or the id as the trailing
+              // `_<id>.json` segment (Hermes' `<ts>_<id>.json` layout).
               for (const f of files) {
-                if (f.includes(id) || f.startsWith(id) || f.replace(/\.json$/, "") === id) {
+                const stem = f.replace(/\.json$/, "");
+                if (f === id || stem === id || stem.endsWith(`_${id}`)) {
                   match = f;
                   break;
                 }
@@ -3461,12 +3878,63 @@ export default defineConfig({
               /* ignore */
             }
             if (!match) {
+              // No legacy file — try Hermes 0.17+'s sqlite store. The id is
+              // regex-validated above, so embedding it in SQL is safe.
+              const rows = queryHermesStateDb(
+                `SELECT role, content, timestamp FROM messages WHERE session_id = '${id}' AND role IN ('user','assistant') ORDER BY timestamp`,
+              );
+              const meta = queryHermesStateDb(
+                `SELECT model, source, started_at, ended_at FROM sessions WHERE id = '${id}' LIMIT 1`,
+              )?.[0];
+              if (rows && rows.length > 0) {
+                const clean = rows.map((m) => {
+                  let content = typeof m.content === "string" ? m.content : "";
+                  // Multimodal messages store content as a JSON array of parts.
+                  if (content.trim().startsWith("[")) {
+                    try {
+                      const arr = JSON.parse(content);
+                      if (Array.isArray(arr))
+                        content = arr
+                          .map((c: any) =>
+                            typeof c === "string" ? c : c?.text ?? c?.content ?? "",
+                          )
+                          .filter(Boolean)
+                          .join("\n");
+                    } catch {
+                      /* keep raw */
+                    }
+                  }
+                  return {
+                    role: m.role ?? "unknown",
+                    content,
+                    ts:
+                      typeof m.timestamp === "number"
+                        ? new Date(m.timestamp * 1000).toISOString()
+                        : null,
+                  };
+                });
+                const toIso = (v: any) =>
+                  typeof v === "number" ? new Date(v * 1000).toISOString() : null;
+                res.setHeader("Content-Type", "application/json");
+                res.setHeader("Cache-Control", "no-store");
+                res.end(
+                  JSON.stringify({
+                    sessionId: id,
+                    model: meta?.model ?? null,
+                    platform: meta?.source ?? null,
+                    startedAt: toIso(meta?.started_at),
+                    lastUpdated: toIso(meta?.ended_at) ?? toIso(meta?.started_at),
+                    messages: clean,
+                  }),
+                );
+                return;
+              }
               res.statusCode = 404;
               res.end(JSON.stringify({ error: "not found" }));
               return;
             }
             try {
-              const raw = readFileSync(join(sessionsDir, match), "utf-8");
+              const raw = await readFileAsync(join(sessionsDir, match), "utf-8");
               const j = JSON.parse(raw);
               const msgs = Array.isArray(j.messages) ? j.messages : [];
               // Surface only what the UI needs — drop system prompts and
@@ -4322,6 +4790,77 @@ export default defineConfig({
             });
           });
 
+          // POST /__dream_action — persist the operator's verdict on a
+          // prescription (skip / done / restore) into
+          // ~/.claude-os/dreams/state.json. Before this endpoint the card
+          // buttons only mutated React state, so every dismissal came back
+          // on refresh — and the Dream engine itself never learned which
+          // prescriptions the operator had already acted on. Writing the
+          // status here closes the loop: the next dream run reads state.json
+          // (per SKILL.md step 6) and won't resurface accepted/dismissed
+          // items for 30 days. Loopback + token (state-mutating).
+          server.middlewares.use("/__dream_action", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "loopback only" }));
+              return;
+            }
+            if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "invalid token" }));
+              return;
+            }
+            const chunks: Buffer[] = [];
+            req.on("data", (c: Buffer) => chunks.push(c));
+            req.on("end", () => {
+              let id = "";
+              let action = "";
+              try {
+                const parsed = JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}");
+                id = typeof parsed.id === "string" ? parsed.id : "";
+                action = typeof parsed.action === "string" ? parsed.action : "";
+              } catch {
+                /* invalid body → caught by the guards below */
+              }
+              // Slug-shaped ids only — this string becomes a JSON key in a
+              // file other tools read, so keep junk and path-ish input out.
+              if (!/^[\w-]{1,80}$/.test(id) || !["dismissed", "accepted", "restored"].includes(action)) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ ok: false, error: "need id (slug) + action (dismissed|accepted|restored)" }));
+                return;
+              }
+              try {
+                const dreamsDir = join(homedir(), ".claude-os", "dreams");
+                const statePath = join(dreamsDir, "state.json");
+                if (!existsSync(dreamsDir)) mkdirSync(dreamsDir, { recursive: true });
+                let state: any = {};
+                if (existsSync(statePath)) {
+                  try {
+                    state = JSON.parse(readFileSync(statePath, "utf-8")) || {};
+                  } catch {
+                    state = {};
+                  }
+                }
+                if (typeof state.actions !== "object" || state.actions === null) state.actions = {};
+                const now = new Date().toISOString();
+                const prior = state.actions[id] ?? { firstSeenAt: now };
+                state.actions[id] = {
+                  ...prior,
+                  status: action === "restored" ? "new" : action,
+                  lastSeenAt: prior.lastSeenAt ?? now,
+                  [action === "accepted" ? "acceptedAt" : action === "dismissed" ? "dismissedAt" : "restoredAt"]: now,
+                };
+                writeFileSync(statePath, JSON.stringify(state, null, 2), { mode: 0o644 });
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ ok: true, id, status: state.actions[id].status }));
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ ok: false, error: err.message }));
+              }
+            });
+          });
+
           // GET /__dream_engines — probes the machine for every engine that
           // could run the /dream skill and reports installation + auth
           // readiness for each. The homepage Dream card renders this list
@@ -4339,7 +4878,7 @@ export default defineConfig({
             // homepage to show a "Engine: <name>" chip on the Dream card so
             // the picker isn't gated behind the empty state.
             let currentChoice: string | null = null;
-            let openRouterModel = "anthropic/claude-sonnet-4.6";
+            let openRouterModel = "anthropic/claude-fable-5";
             try {
               const cfgPath = join(home, ".claude-os", "config.json");
               if (existsSync(cfgPath)) {
@@ -4440,7 +4979,7 @@ export default defineConfig({
             engines.push({
               id: "openrouter",
               name: "OpenRouter",
-              description: "Claude Sonnet 4.6 via API (model selectable) — sends your activity to OpenRouter",
+              description: "Claude Fable 5 via API (model selectable) — sends your activity to OpenRouter",
               installed: openRouterKey,
               ready: openRouterKey,
               needsAction: openRouterKey
@@ -4472,9 +5011,12 @@ export default defineConfig({
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Cache-Control", "no-store");
             // A small curated set of OpenRouter slugs for the model picker.
-            // Sonnet 4.6 is the verified default; the rest are common options.
+            // Fable 5 (frontier tier) leads as the default — deepest analysis
+            // for an overnight batch job where latency doesn't matter.
+            // Sonnet 4.6 stays as the fast/cheap option.
             const openRouterModels = [
-              { id: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6 · default" },
+              { id: "anthropic/claude-fable-5", label: "Claude Fable 5 · frontier · default" },
+              { id: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6 · fast" },
               { id: "openai/gpt-5.5", label: "OpenAI GPT-5.5" },
               { id: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash" },
               { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },

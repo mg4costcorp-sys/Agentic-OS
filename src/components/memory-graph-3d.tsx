@@ -755,9 +755,12 @@ export function MemoryGraph3D({
       {/* Controls — sit BELOW the canvas */}
       {!embedded && (
         <div className="mt-3 rounded-xl border border-border/60 bg-card/60 backdrop-blur p-3 text-[11px] text-muted-foreground">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-5">
+          {/* Stack until xl — between lg and xl the fixed-width buttons+stats
+              used to squeeze the flex-1 thumbnail selector into unreadable
+              slivers with overlapping captions. */}
+          <div className="flex flex-col xl:flex-row xl:items-center gap-3 xl:gap-5">
             {/* Layout selector with thumbnails */}
-            <div className="flex-1 min-w-0">
+            <div className="w-full max-w-[460px] xl:max-w-none xl:flex-1 xl:min-w-[280px]">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[9px] uppercase tracking-[0.18em] text-muted-foreground/80">
                   Layout
@@ -797,7 +800,7 @@ export function MemoryGraph3D({
               </div>
             </div>
 
-            <div className="hidden lg:block w-px self-stretch bg-border/60" />
+            <div className="hidden xl:block w-px self-stretch bg-border/60" />
 
             {/* Buttons */}
             <div className="flex flex-wrap items-center gap-1.5">
@@ -843,8 +846,8 @@ export function MemoryGraph3D({
             </div>
 
             {/* Stats + slider */}
-            <div className="flex items-center gap-4 lg:ml-auto">
-              <div className="flex items-center gap-2 min-w-[140px]">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 xl:ml-auto">
+              <div className="flex items-center gap-2 min-w-[140px] max-w-[220px] flex-1">
                 <span className="text-[9px] uppercase tracking-wider opacity-70">Links</span>
                 <input
                   type="range"

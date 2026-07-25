@@ -33,7 +33,9 @@ const STATE_DIR = join(HOME, ".claude-os");
 const DREAMS_DIR = join(STATE_DIR, "dreams");
 const CONFIG = join(STATE_DIR, "config.json");
 const today = new Date().toISOString().slice(0, 10);
-const DEFAULT_OR_MODEL = "anthropic/claude-sonnet-4.6";
+// Fable 5 — frontier tier. The Dream is an overnight batch job, so we spend
+// the deepest model on it by default; latency is free at 7am.
+const DEFAULT_OR_MODEL = "anthropic/claude-fable-5";
 
 function readConfig(): { dreamEngine?: string; openRouterModel?: string } {
   try {
@@ -142,7 +144,7 @@ function writeDream(dream: any): void {
 
 function runAgenticCli(bin: string, args: string[], label: string): number {
   console.log(`[run-dream] ${label}: launching ${bin}`);
-  const r = spawnSync(bin, args, { stdio: "inherit", timeout: 480_000 });
+  const r = spawnSync(bin, args, { stdio: "inherit", timeout: 240_000 });
   return r.status ?? 1;
 }
 

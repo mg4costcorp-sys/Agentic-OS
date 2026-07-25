@@ -6,8 +6,8 @@
     "fieldProvenance": "Every drift-prone field is tagged via top-level `freshness.liveFields` (overwritten from OpenRouter at render) vs everything else (curated, dated to freshness.snapshot.curatedAsOf). Per-model `liveFields` records what actually merged this render; nulls fall back to curated values.",
     "humanControl": "roster.inPlay is the ONLY user-authored field (localStorage key claude-os-model-roster). It is the agent's hard gate — do not route where inPlay===false."
   },
-  "asOf": "2026-06-08",
-  "generatedAt": "2026-06-08T00:00:00Z",
+  "asOf": "2026-07-04",
+  "generatedAt": "2026-07-04T00:00:00Z",
   "freshness": {
     "live": {
       "source": "openrouter",
@@ -21,7 +21,7 @@
       ]
     },
     "snapshot": {
-      "curatedAsOf": "2026-06",
+      "curatedAsOf": "2026-07",
       "by": "operator",
       "curatedFields": [
         "benchmarks",
@@ -71,10 +71,10 @@
   "picks": [
     {
       "slot": "smartest",
-      "modelId": "claude-opus-4-8",
+      "modelId": "claude-fable-5",
       "label": "Smartest",
-      "metric": "AA Index 61",
-      "reason": "#1 on the Artificial Analysis Intelligence Index (61) and the runaway practitioner default for production work."
+      "metric": "AA Index 64.9",
+      "reason": "Launched #1 on the Artificial Analysis Intelligence Index (64.9), ~5 points clear of the next lab; also #1 across every Design Arena category."
     },
     {
       "slot": "proFavorite",
@@ -132,6 +132,84 @@
     }
   },
   "models": [
+    {
+      "id": "claude-fable-5",
+      "name": "Claude Fable 5",
+      "vendor": "Anthropic",
+      "vendorKey": "claude",
+      "openrouterId": "anthropic/claude-fable-5",
+      "tier": "frontier",
+      "status": "new",
+      "oneLiner": "Anthropic's newest flagship — #1 on the Artificial Analysis Intelligence Index and the top-ranked design model, at 2x Opus pricing.",
+      "price": {
+        "inputPerM": 10,
+        "outputPerM": 50,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": 72,
+      "liveFields": [
+        "price",
+        "context",
+        "speedTps"
+      ],
+      "benchmarks": {
+        "lmarenaElo": 1510,
+        "aaIndex": 64.9,
+        "aiderPolyglot": null,
+        "sweBench": null,
+        "arenaAgent": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "very positive",
+        "score": 0.9,
+        "summary": "Launched (GA 2026-06-09) at #1 on the Artificial Analysis Intelligence Index (64.9) and #1 across every Design Arena category; the open debate is whether ~2x Opus pricing is worth a few points of intelligence.",
+        "loved": [
+          "#1 on the Artificial Analysis Intelligence Index at 64.9 — roughly 5 points clear of the next lab's best",
+          "#1 in every Design Arena category (overall Elo 1402, 71% win rate) — the strongest design / frontend model available",
+          "Beats Opus 4.8 on Anthropic's own agentic table: SWE-bench Pro 80.3 vs 69.2, FrontierCode Diamond 29.3 vs 13.4, OSWorld 85.0 vs 83.4",
+          "Often matches prior models' top-effort quality at medium effort; ~25-30% fewer turns on multi-step suites"
+        ],
+        "gripes": [
+          "2x Opus 4.8 pricing at $10/$50 per M — the most expensive frontier option",
+          "Thinking can't be disabled; even low effort still spends reasoning tokens",
+          "'max' effort is session-only and burns tokens fast",
+          "Human-preference (LMArena) standing is unsettled — a brief post-launch regional withdrawal shrank the vote sample, so reported Elo varies widely"
+        ]
+      },
+      "strengths": [
+        "Top raw reasoning intelligence (#1 AA Index, 64.9)",
+        "Best-in-class design, frontend and UI generation",
+        "Strong agentic coding — beats Opus 4.8 on SWE-bench Pro and FrontierCode"
+      ],
+      "weaknesses": [
+        "Highest token cost of any frontier model ($10/$50 per M)",
+        "No way to turn thinking off — poor fit for cheap high-volume loops",
+        "Human-preference / arena ranking still stabilizing after launch"
+      ],
+      "bestFor": [
+        "Design, frontend and UI generation",
+        "Hardest reasoning tasks where intelligence outweighs price",
+        "Agentic coding on complex multi-step suites",
+        "Work that benefits from high / max reasoning effort"
+      ],
+      "avoidFor": [
+        "High-volume or cost-sensitive throughput",
+        "Latency-critical interactive UX",
+        "Tasks where Opus 4.8 lands within a point or two at half the price"
+      ],
+      "proUsage": "Routed as the 'design + hardest-reasoning' brain — pros reach for Fable 5 on UI/frontend and the toughest problems, and fall back to Opus 4.8 or cheaper open models for volume where the 2x price isn't justified.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/anthropic/claude-fable-5",
+        "vendor": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "leaderboard": "https://artificialanalysis.ai/models/claude-fable-5"
+      },
+      "popularity": 4
+    },
     {
       "id": "claude-opus-4-8",
       "name": "Claude Opus 4.8",

@@ -124,28 +124,6 @@ async function copyPersonasSkill(): Promise<{ ok: boolean; path: string; existed
   }
 }
 
-// Drop the `handoff` skill into ~/.claude/skills/ so `/handoff` is available
-// on every machine that runs setup — it writes session handoffs into
-// docs/handoffs/ and pushes them, letting a session started on one Mac
-// resume on the other via `git pull` (session history itself never syncs).
-async function copyHandoffSkill(): Promise<{ ok: boolean; path: string; existed: boolean }> {
-  const src = join(REPO_ROOT, "skills", "handoff");
-  const dest = join(HOME, ".claude", "skills", "handoff");
-  const existed = existsSync(dest);
-  if (!existsSync(src)) {
-    fail(`bundled /handoff skill not found at ${src}`);
-    return { ok: false, path: dest, existed };
-  }
-  try {
-    await mkdir(dirname(dest), { recursive: true });
-    await cp(src, dest, { recursive: true, force: true });
-    return { ok: true, path: dest, existed };
-  } catch (err) {
-    fail(`copying /handoff skill failed: ${err instanceof Error ? err.message : String(err)}`);
-    return { ok: false, path: dest, existed };
-  }
-}
-
 async function wireGitHooks(): Promise<void> {
   // The repo ships a .githooks/pre-commit that scans staged content for
   // common API-key prefixes and refuses commits that include them. It only
@@ -252,19 +230,6 @@ async function main() {
     warn(
       "personas skill not installed — Hermes may not recognise persona names you add later",
     );
-  }
-
-  step("Install the /handoff skill");
-  log(
-    c.dim +
-      "  Copies skills/handoff/ → ~/.claude/skills/handoff/  (writes cross-machine session handoffs to docs/handoffs/)" +
-      c.reset,
-  );
-  const handoffSkill = await copyHandoffSkill();
-  if (handoffSkill.ok) {
-    ok(`${handoffSkill.existed ? "refreshed" : "installed"} at ${handoffSkill.path}`);
-  } else {
-    warn("handoff skill not installed — /handoff won't be available");
   }
 
   step("Install the daily Dream cron (macOS launchd · Windows Task Scheduler)");

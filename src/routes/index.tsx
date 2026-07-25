@@ -93,6 +93,10 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
+
+// Cinematic full-screen replay of last night's Dream run — loaded on demand
+// so the homepage bundle doesn't pay for it until the user hits ▶ Replay.
+const DreamReplay = lazy(() => import("@/components/dream-replay"));
 import {
   useTimeSaved,
   totals,
@@ -398,6 +402,30 @@ interface DreamSuggestion {
   command?: string;
   dollarImpact: number;
   timeImpactMins: number;
+  /** Lifecycle from ~/.claude-os/dreams/state.json (merged by the aggregator).
+   *  "dismissed"/"accepted" items start hidden; /__dream_action keeps the
+   *  verdict across refreshes. */
+  status?: string;
+  /** Days since this prescription id first appeared — recurring items get a
+   *  "seen Nd" chip so they read differently from fresh ones. */
+  ageDays?: number;
+}
+
+// Persist a Skip / Mark done / Restore verdict to ~/.claude-os/dreams/state.json
+// via the dev server. Best-effort: the UI hides the card optimistically either
+// way; on failure the verdict just doesn't survive the next refresh.
+async function postDreamAction(id: string | undefined, action: "dismissed" | "accepted" | "restored") {
+  if (!id) return;
+  try {
+    const { token } = await fetch("/__token").then((r) => r.json());
+    await fetch("/__dream_action", {
+      method: "POST",
+      headers: { "X-Claude-OS-Token": token, "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action }),
+    });
+  } catch {
+    /* dev server endpoint unavailable (static build) — session-only hide */
+  }
 }
 
 // Real prescriptions from ~/.claude-os/dreams/dream-{date}.json (inlined by
@@ -439,7 +467,7 @@ function DreamEngineSwitcher() {
   const [currentChoice, setCurrentChoice] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [orModel, setOrModel] = useState<string>("anthropic/claude-sonnet-4.6");
+  const [orModel, setOrModel] = useState<string>("anthropic/claude-fable-5");
   const [orModels, setOrModels] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
@@ -1011,6 +1039,12 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
   const [period, setPeriod] = useState<Period>("week");
   const [skillsExpanded, setSkillsExpanded] = useState<boolean>(false);
   const [dismissedDreams, setDismissedDreams] = useState<Set<number>>(new Set());
+  // "Restore dismissed" override: when true, prescriptions hidden by their
+  // persisted state.json status (dismissed/accepted) come back for this
+  // session; the restore is also written back via /__dream_action.
+  const [dreamsRestored, setDreamsRestored] = useState(false);
+  // Full-screen cinematic replay of last night's dream (▶ Replay button).
+  const [replayOpen, setReplayOpen] = useState(false);
   const [expandedModel, setExpandedModel] = useState<string | null>(null);
   const [expandedKpi, setExpandedKpi] = useState<"spend" | "skills" | null>(null);
   const [dreamIdx, setDreamIdx] = useState(0);
@@ -1718,25 +1752,79 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
                   <div className="text-[10px] uppercase tracking-[0.28em] text-violet-200/70 mb-2">
                     Dream Review
                   </div>
-                  <div className="text-2xl md:text-3xl font-semibold tracking-tight text-violet-50">
-                    {dreamCount - dismissedDreams.size} improvement
-                    {dreamCount - dismissedDreams.size === 1 ? "" : "s"} found overnight
-                  </div>
-                  <div className="text-[12px] text-violet-200/60 mt-1.5">
-                    {dreamGeneratedAt
-                      ? `Pattern analysis across 7 days · generated ${new Date(dreamGeneratedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                      : dreamCount === 0
-                        ? "Dream runs automatically on your daily cron (your chosen engine). Use the engine picker above to generate one now."
-                        : "Pattern analysis across 7 days"}
-                  </div>
+                  {(() => {
+                    // Age of the dream itself — "found overnight" is only an
+                    // honest headline for a fresh run. An old dream still
+                    // renders, but says how old it is instead of pretending.
+                    const dreamAgeDays = dreamDate
+                      ? Math.floor((Date.now() - new Date(dreamDate).getTime()) / 86_400_000)
+                      : 0;
+                    // Count both hide mechanisms (session clicks + persisted
+                    // state.json verdicts) without double-counting overlaps.
+                    const shownCount = dreamSuggestions.filter(
+                      (d, i) =>
+                        !dismissedDreams.has(i) &&
+                        (dreamsRestored || (d.status !== "dismissed" && d.status !== "accepted")),
+                    ).length;
+                    return (
+                      <>
+                        <div className="text-2xl md:text-3xl font-semibold tracking-tight text-violet-50">
+                          {shownCount} improvement
+                          {shownCount === 1 ? "" : "s"}{" "}
+                          {dreamAgeDays <= 1 ? "found overnight" : `from ${dreamAgeDays} days ago`}
+                        </div>
+                        <div className="text-[12px] text-violet-200/60 mt-1.5">
+                          {dreamGeneratedAt
+                            ? `Pattern analysis across 7 days · generated ${new Date(dreamGeneratedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+                            : dreamCount === 0
+                              ? "Dream runs automatically on your daily cron (your chosen engine). Use the engine picker above to generate one now."
+                              : "Pattern analysis across 7 days"}
+                          {dreamAgeDays > 3 && (
+                            <span className="ml-2 text-amber-300/90">
+                              · cron may be failing — check ~/.claude-os/dream-cron.log
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {dismissedDreams.size > 0 && (
+                  {(dismissedDreams.size > 0 ||
+                    (!dreamsRestored &&
+                      dreamSuggestions.some(
+                        (d) => d.status === "dismissed" || d.status === "accepted",
+                      ))) && (
                     <button
-                      onClick={() => setDismissedDreams(new Set())}
+                      onClick={() => {
+                        // Un-hide locally AND write the restore back so the
+                        // items stay visible after a refresh / next dream run.
+                        for (const d of dreamSuggestions) {
+                          if (d.status === "dismissed" || d.status === "accepted") {
+                            void postDreamAction(d.id, "restored");
+                          }
+                        }
+                        setDismissedDreams(new Set());
+                        setDreamsRestored(true);
+                      }}
                       className="text-[11px] uppercase tracking-[0.2em] px-4 py-2 rounded-lg bg-violet-500/15 border border-violet-300/30 text-violet-100 hover:bg-violet-500/30 transition-colors backdrop-blur"
                     >
                       Restore dismissed
+                    </button>
+                  )}
+                  {dreamSuggestions.length > 0 && (
+                    <button
+                      onClick={() => setReplayOpen(true)}
+                      className="text-[11px] uppercase tracking-[0.2em] px-4 py-2 rounded-lg border text-violet-50 transition-all backdrop-blur inline-flex items-center gap-2 hover:scale-[1.03]"
+                      style={{
+                        background:
+                          "linear-gradient(135deg, rgba(139,92,246,0.35), rgba(236,72,153,0.25))",
+                        borderColor: "rgba(196,181,253,0.5)",
+                        boxShadow: "0 8px 28px -10px rgba(167,139,250,0.7)",
+                      }}
+                      title="Watch a cinematic replay of last night's dream — every number is real"
+                    >
+                      <span aria-hidden>▶</span> Replay the dream
                     </button>
                   )}
                   <DreamEngineSwitcher />
@@ -1744,9 +1832,11 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
               </div>
 
               {(() => {
+                const hiddenByState = (d: DreamSuggestion) =>
+                  !dreamsRestored && (d.status === "dismissed" || d.status === "accepted");
                 const visible = dreamSuggestions
                   .map((d, i) => ({ ...d, originalIndex: i }))
-                  .filter((d) => !dismissedDreams.has(d.originalIndex));
+                  .filter((d) => !dismissedDreams.has(d.originalIndex) && !hiddenByState(d));
                 if (visible.length === 0) {
                   // Empty-state branches by healthStatus from the aggregator:
                   //   silent_failure → cron scheduled but no JSON; almost
@@ -1794,6 +1884,18 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
                     prev={() => setDreamIdx((i) => (i - 1 + visible.length) % visible.length)}
                     next={() => setDreamIdx((i) => (i + 1) % visible.length)}
                     onDismiss={() => {
+                      void postDreamAction(cur.id, "dismissed");
+                      setDismissedDreams((prev) => {
+                        const next = new Set(prev);
+                        next.add(cur.originalIndex);
+                        return next;
+                      });
+                      setDreamIdx(0);
+                    }}
+                    onDone={() => {
+                      // "Apply & mark done" — persisted as accepted so the next
+                      // dream run treats it as handled (30d cool-off per SKILL.md).
+                      void postDreamAction(cur.id, "accepted");
                       setDismissedDreams((prev) => {
                         const next = new Set(prev);
                         next.add(cur.originalIndex);
@@ -1811,6 +1913,80 @@ export function Home({ forceSetupModal = false }: { forceSetupModal?: boolean } 
               <DreamSourcesStrip />
             </div>
           </div>
+
+          {/* Cinematic replay — every number sourced from live-data.json. */}
+          {replayOpen && (
+            <Suspense fallback={null}>
+              {(() => {
+                const daily = Array.isArray(ld?.daily) ? ld.daily : [];
+                const lastDay = daily.length > 0 ? daily[daily.length - 1] : null;
+                const counters = [
+                  { label: "Messages · 7 days", value: ld?.summary?.messagesLast7d ?? 0 },
+                  { label: "Sessions · 24h", value: lastDay?.sessions ?? 0 },
+                  { label: "Memory files", value: ld?.memory?.stats?.totalFiles ?? 0 },
+                  { label: "Hermes sessions", value: ld?.hermes?.sessionCount ?? 0 },
+                ].filter((c) => c.value > 0);
+                const srcs = [
+                  {
+                    name: "Claude Code",
+                    color: "#FF7A3D",
+                    live: (ld?.recentProjects?.length ?? 0) > 0,
+                  },
+                  { name: "Hermes", color: "#FFD21E", live: !!ld?.hermes?.installed },
+                  {
+                    name: "Memory",
+                    color: "#a78bfa",
+                    live: (ld?.memory?.stats?.totalFiles ?? 0) > 0,
+                  },
+                  {
+                    name: "Skills",
+                    color: "#60a5fa",
+                    live: (ld?.skills?.active?.length ?? 0) > 0,
+                  },
+                  {
+                    name: "Automations",
+                    color: "#34d399",
+                    live: (ld?.automations?.length ?? 0) > 0,
+                  },
+                  { name: "Usage", color: "#fb923c", live: !!ld?.usage?.claudeWindow },
+                  {
+                    name: "Pinecone",
+                    color: "#22D3EE",
+                    live: (ld?.memory?.stats?.pineconeIndexes ?? 0) > 0,
+                  },
+                ];
+                const model = String(ld?.dream?.model ?? "");
+                // Frontier branding: Fable 5 dreams get the fuchsia frontier
+                // chip (same treatment as the Hermes model picker); other
+                // engines keep the neutral violet.
+                const isFrontier = /fable/i.test(model);
+                const engineLabel = isFrontier
+                  ? "Fable 5 · frontier"
+                  : /hermes/i.test(model)
+                    ? "Hermes"
+                    : model
+                      ? model.slice(0, 22)
+                      : "your engine";
+                return (
+                  <DreamReplay
+                    sources={srcs}
+                    prescriptions={dreamSuggestions as any}
+                    stats={{
+                      counters,
+                      candidates: Math.max(
+                        Number(ld?.dream?.metadata?.totalCandidates) || 0,
+                        dreamSuggestions.length,
+                      ),
+                    }}
+                    date={dreamDate}
+                    engineName={engineLabel}
+                    engineAccent={isFrontier ? "#f0abfc" : undefined}
+                    onClose={() => setReplayOpen(false)}
+                  />
+                );
+              })()}
+            </Suspense>
+          )}
         </section>
 
         {/* ============= MISSION CONTROL — agent-agnostic strategic layer
@@ -3672,6 +3848,7 @@ function DreamCarousel({
   prev,
   next,
   onDismiss,
+  onDone,
 }: {
   cur: DreamSuggestion & { originalIndex: number };
   total: number;
@@ -3679,6 +3856,7 @@ function DreamCarousel({
   prev: () => void;
   next: () => void;
   onDismiss: () => void;
+  onDone: () => void;
 }) {
   const palette = DREAM_PALETTES[cur.tone];
   const [copiedFix, setCopiedFix] = useState(false);
@@ -3800,15 +3978,23 @@ function DreamCarousel({
         <div className="relative p-5 md:p-7 flex flex-col md:min-h-0 md:overflow-hidden">
           {/* Top-right meta cluster — vertical: time saved + dollar impact + last refreshed */}
           <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5">
-            <div
-              className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/10 text-[10px] tabular-nums text-emerald-100"
-              style={{ boxShadow: "0 4px 16px -8px rgba(16,185,129,0.45)" }}
-              title="Estimated impact if you act on this"
-            >
-              <span className="font-semibold tracking-tight">${cur.dollarImpact}/mo</span>
-              <span className="opacity-60">·</span>
-              <span className="opacity-90">{cur.timeImpactMins} min saved</span>
-            </div>
+            {(typeof cur.dollarImpact === "number" || typeof cur.timeImpactMins === "number") && (
+              <div
+                className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/10 text-[10px] tabular-nums text-emerald-100"
+                style={{ boxShadow: "0 4px 16px -8px rgba(16,185,129,0.45)" }}
+                title="Estimated impact if you act on this"
+              >
+                {typeof cur.dollarImpact === "number" && (
+                  <span className="font-semibold tracking-tight">${cur.dollarImpact}/mo</span>
+                )}
+                {typeof cur.dollarImpact === "number" && typeof cur.timeImpactMins === "number" && (
+                  <span className="opacity-60">·</span>
+                )}
+                {typeof cur.timeImpactMins === "number" && (
+                  <span className="opacity-90">{cur.timeImpactMins} min saved</span>
+                )}
+              </div>
+            )}
             <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider text-violet-200/60">
               <Clock className="h-2.5 w-2.5" />
               Refreshed {updatedLabel}
@@ -3821,6 +4007,14 @@ function DreamCarousel({
             >
               {cur.cat}
             </span>
+            {typeof cur.ageDays === "number" && cur.ageDays >= 2 && (
+              <span
+                className="text-[9px] tracking-[0.16em] uppercase px-1.5 py-0.5 rounded border border-amber-400/35 bg-amber-500/10 text-amber-200/90 tabular-nums"
+                title={`This issue has been surfacing for ${cur.ageDays} days without being resolved`}
+              >
+                Recurring · {cur.ageDays}d
+              </span>
+            )}
             <span className="text-[10px] uppercase tracking-wider text-violet-200/60 tabular-nums">
               {index + 1} / {total}
             </span>
@@ -3997,9 +4191,10 @@ function DreamCarousel({
                 <XCircle className="h-3.5 w-3.5" /> Skip
               </button>
               <button
-                onClick={onDismiss}
+                onClick={onDone}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-100 text-[11px] uppercase tracking-wider hover:bg-emerald-500/25 transition-colors"
                 style={{ boxShadow: "0 6px 20px -8px rgba(16,185,129,0.55)" }}
+                title="Mark as handled — Dream won't resurface this for 30 days"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" /> Apply &amp; mark done
               </button>

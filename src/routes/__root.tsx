@@ -7,7 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import appCss from "../styles.css?url";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -15,6 +15,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { Bell } from "lucide-react";
 import { HermesStatusPill } from "@/components/hermes-status-pill";
 import { VersionPill } from "@/components/version-pill";
+import { FloatingOracle } from "@/components/floating-oracle";
 
 function NotFoundComponent() {
   return (
@@ -127,6 +128,22 @@ function RootComponent() {
 
   // Dark mode is permanent — set in RootShell's <html className="dark">
 
+  // The floating Oracle guide — mounted after hydration (localStorage-backed
+  // toggle would otherwise mismatch the server render). Defaults ON so a
+  // fresh install discovers it; the header orb re-enables it once hidden.
+  const [oracleOn, setOracleOn] = useState(false);
+  const [oracleReady, setOracleReady] = useState(false);
+  useEffect(() => {
+    let on = true;
+    try { on = localStorage.getItem("os-oracle-on") !== "0"; } catch { /* privacy mode */ }
+    setOracleOn(on);
+    setOracleReady(true);
+  }, []);
+  const toggleOracle = (next: boolean) => {
+    setOracleOn(next);
+    try { localStorage.setItem("os-oracle-on", next ? "1" : "0"); } catch { /* ignore */ }
+  };
+
   return (
     <QueryClientProvider client={queryClient}>
       <div className="flex min-h-screen w-full bg-background text-foreground">
@@ -144,6 +161,23 @@ function RootComponent() {
                   to /agents/hermes. Renders nothing when Hermes isn't
                   installed so the bar stays clean for users without it. */}
               <HermesStatusPill />
+              {/* Oracle toggle — shows/hides the floating guide orb. */}
+              <button
+                onClick={() => toggleOracle(!oracleOn)}
+                title={oracleOn ? "Hide the Oracle guide" : "Show the Oracle guide"}
+                className="rounded-md p-2 transition-colors hover:bg-accent"
+              >
+                <span
+                  aria-hidden
+                  className="block h-3.5 w-3.5 rounded-full transition-all"
+                  style={{
+                    background: oracleOn
+                      ? "radial-gradient(circle at 35% 35%, #d8fff3, #7be0c8 55%, #0d5c4a)"
+                      : "radial-gradient(circle at 35% 35%, #6b7280, #374151 60%, #111827)",
+                    boxShadow: oracleOn ? "0 0 10px rgba(123,224,200,0.75)" : "none",
+                  }}
+                />
+              </button>
               <button className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                 <Bell className="h-4 w-4" />
               </button>
@@ -155,6 +189,7 @@ function RootComponent() {
           </main>
         </div>
       </div>
+      {oracleReady && <FloatingOracle enabled={oracleOn} onDisable={() => toggleOracle(false)} />}
     </QueryClientProvider>
   );
 }

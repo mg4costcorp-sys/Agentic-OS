@@ -12,6 +12,8 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import { FileText, AlertTriangle, RefreshCw, X, Pencil, Cloud, Search } from "lucide-react";
 import type { MemNode } from "@/components/memory-graph-3d";
 import { MemoryGraphLoader } from "@/components/memory-graph-loader";
+import { KnowledgeExplorer, type KnowledgeGraph } from "@/components/knowledge-explorer";
+import { knowledgeDemo } from "@/lib/mock-data";
 import claudeLogoPng from "@/assets/claude-logo.png";
 import obsidianLogoSvg from "@/assets/logos/obsidian.svg";
 import pineconeIconSvg from "@/assets/logos/pinecone-icon.svg";
@@ -39,6 +41,7 @@ type SourceId = "obsidian" | "claude" | "pinecone";
 
 function MemoryPage() {
   const [selected, setSelected] = useState<MemNode | null>(null);
+  const [activityQuery, setActivityQuery] = useState("");
   const liveData = useLiveData();
   const ld = liveData as any;
   const hasPinecone = (ld?.memory?.stats?.pineconeIndexes ?? 0) > 0 || ld?.detection?.memoryStores?.pinecone?.hasKey === true;
@@ -99,6 +102,14 @@ function MemoryPage() {
     return `multi:${[...activeSet].sort().join(",")}`;
   })();
 
+  // Knowledge graphs — one per Obsidian vault, emitted by the aggregator.
+  // A cold-start clone (no live data) gets the bundled demo graph instead.
+  const liveGraphs: KnowledgeGraph[] = Array.isArray(ld?.memory?.knowledge?.graphs)
+    ? ld.memory.knowledge.graphs.filter((g: KnowledgeGraph) => g?.notes?.length > 0)
+    : [];
+  const knowledgeIsDemo = liveGraphs.length === 0;
+  const knowledgeGraphs = knowledgeIsDemo ? [knowledgeDemo as KnowledgeGraph] : liveGraphs;
+
   // Use real aggregator events when available, else fall back to the mock
   // event feed shipped with the example file.
   const sourceEvents: typeof memoryEvents =
@@ -111,6 +122,20 @@ function MemoryPage() {
     const filtered = sourceEvents.filter((e: any) => matchesActive(e.source));
     return filtered.length ? filtered : sourceEvents;
   }, [activeSet, sourceEvents]);
+
+  // Free-text search across the (already source-filtered) activity feed.
+  // Matches event type, target, destination and source so the user can find a
+  // specific memory event instead of being stuck with the silently-truncated
+  // top-8 list. Empty query = no filtering (identity).
+  const activityResults = useMemo(() => {
+    const q = activityQuery.trim().toLowerCase();
+    if (!q) return visibleEvents;
+    return visibleEvents.filter((e) =>
+      [e.type, e.target, e.destination, e.source]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(q)),
+    );
+  }, [activityQuery, visibleEvents]);
 
   // Stale + missing — prefer aggregator output.
   const staleList: { name: string; updated: string }[] =
@@ -283,25 +308,47 @@ function MemoryPage() {
       </section>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border rounded-xl overflow-hidden border border-border">
-        <Panel title="Recent activity" tone="ok" wide>
-          {visibleEvents.slice(0, 8).map((e) => (
-            <EventRow key={e.id} event={e} />
-          ))}
+        <Panel
+          title="Recent activity"
+          tone="ok"
+          wide
+          headerRight={
+            <ActivitySearch
+              value={activityQuery}
+              onChange={setActivityQuery}
+              shown={Math.min(activityResults.length, 8)}
+              total={visibleEvents.length}
+            />
+          }
+        >
+          {activityResults.length > 0 ? (
+            activityResults
+              .slice(0, 8)
+              .map((e, i) => <EventRow key={`${e.id}-${i}`} event={e} />)
+          ) : (
+            <li className="px-5 py-6 text-xs text-muted-foreground text-center">
+              No activity matches “{activityQuery.trim()}”.
+            </li>
+          )}
         </Panel>
         <Panel title="Stale" tone="warn">
-          {staleList.map((m) => (
-            <Row key={m.name} left={m.name} right={m.updated} tone="amber" />
+          {staleList.map((m, i) => (
+            <Row key={`${m.name}-${i}`} left={m.name} right={m.updated} tone="amber" />
           ))}
         </Panel>
         <Panel title="Missing" tone="danger">
-          {missingList.map((m) => (
-            <Row key={m} left={m} right="missing" tone="red" />
+          {missingList.map((m, i) => (
+            <Row key={`${m}-${i}`} left={m} right="missing" tone="red" />
           ))}
           {conflictsList.map((c) => (
             <Row key={c} left={c} right="conflict" tone="red" />
           ))}
         </Panel>
       </div>
+
+      {/* Knowledge explorer — the relational layer: walk the vault's
+          wikilink graph note-by-note like a knowledge base. */}
+      <KnowledgeExplorer graphs={knowledgeGraphs} isDemo={knowledgeIsDemo} />
 
       {selected && <Inspector node={selected} onClose={() => setSelected(null)} />}
     </div>
@@ -617,11 +664,13 @@ function Panel({
   children,
   tone,
   wide,
+  headerRight,
 }: {
   title: string;
   children: React.ReactNode;
   tone?: "ok" | "warn" | "danger";
   wide?: boolean;
+  headerRight?: React.ReactNode;
 }) {
   const Icon = tone === "warn" ? AlertTriangle : tone === "danger" ? FileText : RefreshCw;
   const c =
@@ -632,11 +681,57 @@ function Panel({
         : "text-muted-foreground";
   return (
     <div className={`bg-card ${wide ? "md:col-span-1" : ""}`}>
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-border">
-        <Icon className={`h-4 w-4 ${c}`} />
-        <div className="text-sm font-semibold tracking-tight">{title}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-4 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon className={`h-4 w-4 shrink-0 ${c}`} />
+          <div className="text-sm font-semibold tracking-tight truncate">{title}</div>
+        </div>
+        {headerRight}
       </div>
       <ul className="divide-y divide-border">{children}</ul>
+    </div>
+  );
+}
+
+function ActivitySearch({
+  value,
+  onChange,
+  shown,
+  total,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  shown: number;
+  total: number;
+}) {
+  const q = value.trim();
+  return (
+    <div className="flex items-center gap-2 shrink-0">
+      {q && (
+        <span className="text-[10px] tabular-nums text-muted-foreground/80">
+          {shown}/{total}
+        </span>
+      )}
+      <div className="relative">
+        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Filter activity"
+          aria-label="Filter recent memory activity"
+          className="w-32 focus:w-40 transition-[width] rounded-full border border-border/70 bg-card/40 pl-7 pr-6 py-1 text-[11px] text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-foreground/30"
+        />
+        {q && (
+          <button
+            onClick={() => onChange("")}
+            aria-label="Clear activity filter"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
