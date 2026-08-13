@@ -98,6 +98,18 @@ const VOICES = [
 ];
 const SAMPLE_URL = "http://localhost:8099/api/sample";
 
+// Character voices — Fish Audio community models (top-liked picks). These
+// speak Hermes's typed-mode replies through the /__fish_tts proxy; live
+// realtime calls still use the OpenAI voices above.
+const FISH_VOICES = [
+  { id: "fish:d13f84b987ad4f22b56d2b47f4eb838e", label: "Mortal Kombat", vibe: "announcer · finish him", sample: "Test your might! Flawless victory. Fatality!" },
+  { id: "fish:742edcaa1d624e7c8a6608d6b053f770", label: "Landon Ricketts", vibe: "gunslinger · red dead", sample: "Ain't my first rodeo, friend. Let's ride." },
+  { id: "fish:ee885900b0874d12b1c3439d1e56cc95", label: "GLaDOS", vibe: "sarcastic lab AI · portal", sample: "Oh, it's you. The test results are in: still disappointing." },
+  { id: "fish:c39a76f685cf4f8fb41cd5d3d66b497d", label: "David Attenborough", vibe: "nature narrator", sample: "And here, in its natural habitat, the developer attempts to ship on a Friday." },
+  { id: "fish:3ad4d432023c47ee9e6c7805b973630a", label: "Morgan Freeman", vibe: "the narrator", sample: "Sometimes, the code simply works. And no one truly knows why." },
+];
+const isFishVoice = (id: string) => id.startsWith("fish:");
+
 // robust icon: Lucide concept icon · Simple Icons vector → DuckDuckGo real favicon → lettermark
 function Cap({ cap }: { cap: string }) {
   const m: IconDef = ICONS[cap] || { color: CREAM, letter: "?" };
@@ -259,10 +271,33 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
   const shq = (s: string) => "'" + String(s).replace(/'/g, "'\\''") + "'";  // shell-quote a pasted key so it can't inject into the copy-and-run command
   const [sampling, setSampling] = useState<string | null>(null);
   const sampleAudio = useRef<HTMLAudioElement | null>(null);
+  // Speak any text through a Fish Audio character voice (server-side proxy
+  // holds the key). Used for samples AND for typed-mode replies.
+  async function fishSpeak(text: string, fishId: string): Promise<void> {
+    const refId = fishId.replace(/^fish:/, "");
+    const t = await fetch("/__token").then((r) => r.json()).catch(() => null);
+    const r = await fetch("/__fish_tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(t?.token ? { "X-Claude-OS-Token": t.token } : {}) },
+      body: JSON.stringify({ text: text.slice(0, 1200), voice: refId }),
+    });
+    if (!r.ok) throw new Error("fish tts");
+    const a = new Audio(URL.createObjectURL(await r.blob()));
+    sampleAudio.current?.pause();
+    sampleAudio.current = a;
+    await a.play();
+    await new Promise<void>((done) => { a.onended = () => done(); a.onerror = () => done(); });
+  }
   async function playSample(v: string) {
     try {
       sampleAudio.current?.pause();
       setSampling(v);
+      if (isFishVoice(v)) {
+        const fv = FISH_VOICES.find((f) => f.id === v);
+        await fishSpeak(fv?.sample ?? "Hello from Hermes.", v);
+        setSampling(null);
+        return;
+      }
       const r = await fetch(SAMPLE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voice: v, ...(openaiKey ? { key: openaiKey } : {}) }) });
       if (!r.ok) throw new Error("sample");
       const a = new Audio(URL.createObjectURL(await r.blob()));
@@ -278,7 +313,165 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
   const transcriptRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight; }, [turns.length, caption]);
 
+  // ── Character call — mic → speech-to-text → Hermes → Fish TTS out loud.
+  // OpenAI's realtime engine can only speak its own voices, so when a Fish
+  // character is selected the live call runs through our own loop instead.
+  // No voice engine or OpenAI key needed: STT is the browser's, the brain is
+  // Hermes, the mouth is /__fish_tts.
+  async function startCharacterCall() {
+    setCallState("connecting");
+    try {
+      const actx = new AudioContext();
+      // AudioContexts can spawn suspended even inside a click handler — a
+      // suspended context feeds the analyser flat silence forever, which
+      // reads as "it can't hear me".
+      await actx.resume().catch(() => {});
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const micAn = actx.createAnalyser(); micAn.fftSize = 512;
+      actx.createMediaStreamSource(mic).connect(micAn);
+      voice.current = { ...voice.current, actx, mic, micAna: micAn, charActive: true };
+      setCallState("live");
+      setCaption("speak — i'm listening");
+      pumpVoice();
+      charListenLoop();
+    } catch { setCallState("off"); }
+  }
+  // Voice-activity loop: watch the mic's RMS level; when speech is followed
+  // by ~1.1s of silence, ship the recorded clip to Whisper via the voice
+  // engine, then run the turn. No browser speech API involved.
+  function charListenLoop() {
+    const v = voice.current;
+    if (!v.micAna || !v.mic) return;
+    const data = new Uint8Array(v.micAna.fftSize);
+    let recorder: MediaRecorder | null = null;
+    let clip: Blob[] = [];
+    let recStart = 0;
+    let speaking = false, speechMs = 0, silenceMs = 0;
+    // Auto-calibrating gate: track the ambient noise floor and trigger a few
+    // dB above it, so quiet mics still register and loud rooms don't
+    // false-trigger. A fixed threshold was deaf on low-gain mics.
+    let floor = 0.008, aliveMs = 0, everHeard = false;
+    const STEP = 120;
+    const stopRec = () => new Promise<void>((res) => {
+      const rc = recorder; recorder = null;
+      if (!rc || rc.state !== "recording") return res();
+      rc.onstop = () => res();
+      try { rc.stop(); } catch { res(); }
+    });
+    const tick = async () => {
+      if (!voice.current.charActive) { void stopRec(); return; }
+      // while the character talks (or mic is muted) → don't record, don't listen
+      const muted = !(voice.current.mic?.getAudioTracks?.()[0]?.enabled ?? true);
+      if (voice.current.charSpeaking || muted) {
+        speaking = false; speechMs = 0; silenceMs = 0;
+        await stopRec(); clip = [];
+        window.setTimeout(tick, STEP);
+        return;
+      }
+      if (!recorder) {
+        try {
+          recorder = new MediaRecorder(v.mic);
+          clip = []; recStart = performance.now();
+          recorder.ondataavailable = (e) => { if (e.data.size > 0) clip.push(e.data); };
+          recorder.start(250);
+        } catch { window.setTimeout(tick, 1000); return; }
+      }
+      v.micAna.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) { const d = (data[i] - 128) / 128; sum += d * d; }
+      const rms = Math.sqrt(sum / data.length);
+      // floor snaps down fast, drifts up slowly → tracks the room
+      floor = rms < floor ? floor * 0.8 + rms * 0.2 : floor * 0.995 + rms * 0.005;
+      const loud = rms > Math.max(0.012, floor * 2.6);
+      aliveMs += STEP;
+      if (rms > 0.004) everHeard = true;
+      if (!everHeard && aliveMs > 6_000 && aliveMs <= 6_000 + STEP)
+        setCaption("mic looks silent — check input device / permission for this site");
+      if (loud) {
+        if (!speaking) { speaking = true; setListening(true); }
+        setCaption("hearing you…");
+        speechMs += STEP; silenceMs = 0;
+      } else if (speaking) {
+        silenceMs += STEP;
+      } else if (performance.now() - recStart > 15_000) {
+        // idle housekeeping: restart the recorder so silence never piles up
+        await stopRec(); clip = [];
+      }
+      if (speaking && silenceMs >= 850) {
+        setListening(false); setCaption("");
+        await stopRec();
+        const chunks = clip; clip = [];
+        const hadSpeech = speechMs >= 300;
+        speaking = false; speechMs = 0; silenceMs = 0;
+        if (hadSpeech && chunks.length > 0) {
+          const blob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
+          void charTranscribe(blob);
+        }
+      }
+      window.setTimeout(tick, STEP);
+    };
+    tick();
+  }
+  async function charTranscribe(blob: Blob) {
+    setThinking(true);
+    try {
+      const r = await fetch("http://localhost:8099/api/stt", { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
+      const j: any = r.ok ? await r.json() : null;
+      const text = (j?.text ?? "").trim();
+      if (text) { await charTurn(text); return; }
+    } catch { /* engine down — stay in call */ }
+    setThinking(false);
+  }
+  async function charTurn(text: string) {
+    if (!onVoiceRequest) return;
+    setTurns((t) => [...t.slice(-30), { who: "you", text }]);
+    setThinking(true);
+    let reply = "";
+    try { reply = (await onVoiceRequest(text, { voice: true, save: true, yolo: true })).trim(); } catch { reply = "I couldn't reach the agent just now."; }
+    setThinking(false);
+    if (!reply) return;
+    setTurns((t) => [...t.slice(-30), { who: "hermes", text: reply }]);
+    // speak through the character — mic transcription pauses so the
+    // character doesn't hear itself through the speakers. The reply is
+    // split into sentence chunks synthesized IN PARALLEL and played in
+    // order, so the first sentence starts in ~a second instead of waiting
+    // for the whole paragraph to render.
+    const v = voice.current;
+    v.charSpeaking = true;
+    try { v.charRec?.stop(); } catch { /* not running */ }
+    try {
+      const refId = voiceId.replace(/^fish:/, "");
+      const tok = await fetch("/__token").then((r) => r.json()).catch(() => null);
+      const fetchChunk = async (text: string): Promise<Blob | null> => {
+        try {
+          const r = await fetch("/__fish_tts", { method: "POST", headers: { "Content-Type": "application/json", ...(tok?.token ? { "X-Claude-OS-Token": tok.token } : {}) }, body: JSON.stringify({ text, voice: refId }) });
+          return r.ok ? await r.blob() : null;
+        } catch { return null; }
+      };
+      // sentence-ish chunks, tiny ones merged so pacing stays natural
+      const parts = reply.slice(0, 1600).replace(/\s+/g, " ").match(/[^.!?]+[.!?]+["')\]]?\s*|[^.!?]+$/g) ?? [reply.slice(0, 1600)];
+      const chunks: string[] = [];
+      let buf = "";
+      for (const p of parts) { buf += p; if (buf.trim().length > 70) { chunks.push(buf.trim()); buf = ""; } }
+      if (buf.trim()) chunks.push(buf.trim());
+      const inflight = chunks.slice(0, 10).map(fetchChunk);
+      for (const f of inflight) {
+        if (!voice.current.charActive && callState !== "live") break;
+        const blob = await f;
+        if (!blob) continue;
+        const a = new Audio(URL.createObjectURL(blob));
+        // wire the character's output into the same analyser the orb reads —
+        // the core lights up and breathes exactly like a realtime call
+        try { const src = v.actx.createMediaElementSource(a); const an = v.actx.createAnalyser(); an.fftSize = 256; src.connect(an); an.connect(v.actx.destination); voice.current.aiAna = an; } catch { /* analyser optional */ }
+        await a.play();
+        await new Promise<void>((done) => { a.onended = () => done(); a.onerror = () => done(); });
+      }
+    } catch { /* stay in the call even if one line fails to speak */ }
+    v.charSpeaking = false;
+    if (v.charActive) { try { v.charRec?.start(); } catch { /* already running */ } }
+  }
   async function startCall(keyOverride?: string) {
+    if (isFishVoice(voiceId)) return startCharacterCall();
     const key = (keyOverride ?? openaiKey).trim();
     setCallState("connecting");
     try {
@@ -300,6 +493,9 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
   }
   // gate the call behind the setup chooser until a reachable, keyed voice engine exists
   async function startVoice() {
+    // Character calls don't touch the OpenAI voice engine at all — no key,
+    // no engine gate. Straight into the STT → Hermes → Fish loop.
+    if (isFishVoice(voiceId)) return startCharacterCall();
     try {
       const h = await fetch("http://localhost:8099/api/health").then((r) => r.json());
       setEngineUp(true); setEngineKeyed(!!h?.keyed);
@@ -362,7 +558,7 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
     return () => window.removeEventListener("keydown", onKey);
   }, [callState]);
   function endCall() {
-    const v = voice.current; try { cancelAnimationFrame(v.raf); v.dc?.close(); v.pc?.close(); v.mic?.getTracks?.().forEach((t: any) => t.stop()); v.actx?.close?.(); } catch {}
+    const v = voice.current; try { v.charActive = false; v.charSpeaking = false; window.clearTimeout(v.charTimer); v.charRec?.abort?.(); cancelAnimationFrame(v.raf); v.dc?.close(); v.pc?.close(); v.mic?.getTracks?.().forEach((t: any) => t.stop()); v.actx?.close?.(); } catch {}
     // hand the whole conversation back to Hermes so it persists what mattered
     const convo = turnsRef.current;
     if (convo.length > 1 && onVoiceRequest) {
@@ -454,7 +650,10 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
     setTyping(true);
     try {
       const reply = await onVoiceRequest(text, { save: true });
-      setTurns((t) => [...t.slice(-30), { who: "hermes", text: (reply || "").trim() || "…" }]);
+      const spoken = (reply || "").trim() || "…";
+      setTurns((t) => [...t.slice(-30), { who: "hermes", text: spoken }]);
+      // Character voice picked → the reply is spoken out loud too.
+      if (isFishVoice(voiceId) && spoken !== "…") fishSpeak(spoken, voiceId).catch(() => {});
     } catch {
       setTurns((t) => [...t.slice(-30), { who: "hermes", text: "I couldn't reach the agent just now." }]);
     }
@@ -629,8 +828,23 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
                 </div>
               );
             })}
+            <div className="px-4 pt-2.5 pb-1 hermes-mono text-[8px] uppercase tracking-[0.2em]" style={{ color: "rgba(255,210,33,0.55)" }}>Character · Fish Audio</div>
+            {FISH_VOICES.map((v) => {
+              const sel = voiceId === v.id;
+              return (
+                <div key={v.id} className="flex items-center gap-1.5 px-2">
+                  <button type="button" onClick={() => setVoiceId(v.id)} className="flex-1 text-left flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors" style={{ background: sel ? "rgba(255,210,33,0.12)" : "transparent", border: `1px solid ${sel ? "rgba(255,210,33,0.4)" : "transparent"}` }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 99, background: sel ? "#FFD21E" : "rgba(255,230,203,0.25)", boxShadow: sel ? "0 0 8px #FFD21E" : "none", flexShrink: 0 }} />
+                    <span className="flex flex-col leading-tight"><span className="text-[12px]" style={{ color: CREAM }}>{v.label}</span><span className="hermes-mono text-[8px] uppercase tracking-wider" style={{ color: "rgba(255,230,203,0.4)" }}>{v.vibe}</span></span>
+                  </button>
+                  <button type="button" onClick={() => playSample(v.id)} className="shrink-0 grid place-items-center rounded-full transition-colors" style={{ width: 26, height: 26, background: "rgba(255,230,203,0.06)", border: "1px solid rgba(255,230,203,0.16)", color: sampling === v.id ? "#FFD21E" : CREAM }} aria-label={`Play ${v.label} sample`}>
+                    {sampling === v.id ? <span className="ip-spin" style={{ width: 9, height: 9, border: "2px solid rgba(255,210,33,0.3)", borderTopColor: "#FFD21E", borderRadius: "50%", display: "block" }} /> : <Play className="h-3 w-3" fill="currentColor" />}
+                  </button>
+                </div>
+              );
+            })}
           </div>
-          <div className="px-3.5 py-2 border-t hermes-mono text-[8px] uppercase tracking-wider" style={{ borderColor: "rgba(255,230,203,0.1)", color: "rgba(255,230,203,0.38)" }}>applies to your next call · ▶ to preview</div>
+          <div className="px-3.5 py-2 border-t hermes-mono text-[8px] uppercase tracking-wider" style={{ borderColor: "rgba(255,230,203,0.1)", color: "rgba(255,230,203,0.38)" }}>standard: applies to next call · character: speaks typed replies · ▶ preview</div>
         </div>
       )}
 
@@ -707,7 +921,15 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
                         <button type="button" onClick={() => copyCmd(`OPENAI_API_KEY=${shq(openaiKey || keyDraft.trim())} bun run voice`)} className="w-full text-left hermes-mono text-[9px] rounded px-2 py-1.5" style={{ background: "rgba(0,0,0,0.45)", color: "#aef3dd", border: "1px solid rgba(123,224,200,0.22)" }}>{copied ? "✓ copied to clipboard" : "⧉ copy:  OPENAI_API_KEY=… bun run voice"}</button>
                       </div>
                     )}
-                    <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="hermes-mono text-[8px] uppercase tracking-wide mt-2 self-start opacity-60 hover:opacity-100" style={{ color: "#7be0c8" }}>Get a key →</a>
+                    <div className="mt-2 flex items-center gap-2.5">
+                      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="hermes-mono text-[8px] uppercase tracking-wide opacity-60 hover:opacity-100" style={{ color: "#7be0c8" }}>Get a key →</a>
+                      <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" className="hermes-mono text-[8px] uppercase tracking-wide opacity-60 hover:opacity-100" style={{ color: "#7be0c8" }}>Add credits →</a>
+                    </div>
+                    <div className="mt-2 rounded-lg px-2 py-1.5" style={{ background: "rgba(255,210,33,0.06)", border: "1px solid rgba(255,210,33,0.22)" }}>
+                      <div className="text-[9.5px] leading-snug" style={{ color: "rgba(255,230,203,0.7)" }}>
+                        Getting a 401 or "key doesn't work"? A ChatGPT <span style={{ color: CREAM }}>Plus/Pro</span> plan does <span style={{ color: CREAM }}>not</span> include API access — voice bills the API separately, so add a little credit under Billing. And use <span style={{ color: CREAM }}>Chrome</span> — Safari isn't fully supported.
+                      </div>
+                    </div>
                   </div>
                   {/* Local / open-source */}
                   <div className="rounded-xl p-3.5 flex flex-col" style={{ background: "rgba(123,224,200,0.05)", border: "1px solid rgba(123,224,200,0.22)" }}>

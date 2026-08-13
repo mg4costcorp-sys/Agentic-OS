@@ -28,6 +28,7 @@ const SYSTEM = [
   "Natural pattern: when a turn needs Hermes, say a brief natural line first ('Sure — let me look that up') and THEN call ask_hermes; you may keep chatting while it works. When it returns, give the answer in a brief natural wrapper but keep every fact EXACTLY as Hermes gave it — never alter, add to, or drop any detail.",
   "Especially: ANY question about the past, your memory, what was discussed before, or 'what did we talk about' REQUIRES ask_hermes. Never claim from your own head that you don't remember, that you have no record, or that a session 'didn't carry over' — you cannot know that. Ask Hermes and report exactly what it returns.",
   "NAVIGATION: you CAN move the user around the dashboard — call the navigate tool with the page path whenever they ask to go/open/show/take them to a section. Paths: '/' (Mission Control home), '/memory' (memory graph), '/skills', '/activity', '/workspaces', '/codegraph' (code graphs), '/agents/hermes' (Hermes chat), '/settings'. After navigating, say a short confirming line ('Here's your memory section'). Never say you can't navigate — you can.",
+  "MEMORY RECALL: when the user asks you to 'pull up', 'bring up', 'find', or 'show' their notes / memory / a document / a topic (e.g. 'pull up my brand voice'), call the focus_memory tool with a short query of what they want. It opens their Memory brain, flies to the matching cluster, and lists the documents they can click and copy. After it returns, say a short line like 'I've pulled up your brand voice — you can read it, or say read it aloud.' Do NOT use ask_hermes for this — focus_memory is faster and visual.",
 ].join(" ");
 
 // Direct mode: pure relay — every turn goes straight to Hermes, no agent-on-top.
@@ -59,6 +60,17 @@ const TOOLS = [{
       },
     },
     required: ["path"],
+  },
+}, {
+  type: "function",
+  name: "focus_memory",
+  description: "Pull up the user's memory/notes on a topic. Opens the Memory brain, flies the 3D graph to the matching cluster, and lists the matching documents for the user to click and copy. Use whenever they say pull up / bring up / find / show me my notes, memory, a document, or a topic.",
+  parameters: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Short search phrase for what to surface, e.g. 'brand voice', 'youtube hooks', 'pricing decisions'." },
+    },
+    required: ["query"],
   },
 }];
 
@@ -143,6 +155,31 @@ Bun.serve({
         });
         if (!r.ok) return new Response(await r.text(), { status: 500, headers: CORS });
         return new Response(r.body, { headers: { ...CORS, "Content-Type": "audio/mpeg" } });
+      } catch (e: any) { return new Response(e?.message || String(e), { status: 500, headers: CORS }); }
+    }
+
+    // Whisper transcription for character calls — raw audio body in, text out.
+    // Robust STT for the Fish-voice pipeline (Chrome's built-in speech
+    // recognition is unavailable in some shells).
+    if (url.pathname === "/api/stt" && req.method === "POST") {
+      if (!KEY) return new Response(JSON.stringify({ error: "no_key" }), { status: 401, headers: { ...CORS, "Content-Type": "application/json" } });
+      try {
+        const buf = await req.arrayBuffer();
+        if (!buf.byteLength || buf.byteLength > 12 * 1024 * 1024) {
+          return new Response(JSON.stringify({ error: "empty_or_too_big" }), { status: 400, headers: { ...CORS, "Content-Type": "application/json" } });
+        }
+        const ct = req.headers.get("content-type") || "audio/webm";
+        const fd = new FormData();
+        fd.append("file", new File([buf], "turn.webm", { type: ct }));
+        fd.append("model", "whisper-1");
+        const r = await fetch(`${BASE}/v1/audio/transcriptions`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${KEY}` },
+          body: fd,
+        });
+        if (!r.ok) return new Response(await r.text(), { status: 500, headers: CORS });
+        const j: any = await r.json().catch(() => ({}));
+        return Response.json({ text: j?.text ?? "" }, { headers: CORS });
       } catch (e: any) { return new Response(e?.message || String(e), { status: 500, headers: CORS }); }
     }
 

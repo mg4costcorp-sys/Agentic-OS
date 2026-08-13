@@ -17,13 +17,15 @@ const ANTIGRAVITY_PURPLE = "#8E75B2";
 // still surfaces the subscription that powers it (e.g. "Claude Max
 // 20x"), so the billing entity is visible but the headline is "what you
 // use" not "what brand you signed up to".
-type Service = "Claude Code" | "Codex" | "OpenRouter" | "Antigravity";
+// "ChatGPT" is the Codex lane's user-facing name — the panel has labelled the
+// row that way since the plan-window rewrite; the union just never caught up.
+type Service = "Claude Code" | "Codex" | "ChatGPT" | "OpenRouter" | "Antigravity";
 
 interface UsageWindow {
   label: string; // "5h" | "Weekly" | "Monthly"
   used: number;
   cap: number;
-  unit: "msgs" | "$";
+  unit: "msgs" | "$" | "%";
   pct: number;
   resetIn: string;
 }
@@ -94,26 +96,51 @@ function buildServices(liveData: any): ServiceUsage[] {
 
   const gw = liveData?.usage?.chatgptWindow as any;
   if (gw) {
-    // Always show ChatGPT when detected — even if message counts are 0.
-    // The aggregator can't parse Codex archives yet but the row confirms
-    // the subscription is connected.
+    // ChatGPT (formerly labelled "Codex") — its real usage comes from OpenAI's
+    // own rate-limit headers, cached by Codex into its session logs. When those
+    // windows are present we show the true %; otherwise we fall back to the
+    // "connected" row so the subscription still surfaces.
+    const fmtReset = (resetsAt?: number): string => {
+      if (!resetsAt) return "no reset";
+      const ms = resetsAt * 1000 - Date.now();
+      if (ms <= 0) return "as of last run";
+      const d = Math.floor(ms / 86_400_000);
+      if (d >= 1) return `~${d}d`;
+      const h = Math.floor(ms / 3_600_000);
+      const m = Math.floor((ms % 3_600_000) / 60_000);
+      return h >= 1 ? `~${h}h` : `~${m}m`;
+    };
+    const realWindows: UsageWindow[] =
+      Array.isArray(gw.windows) && gw.windows.length > 0
+        ? gw.windows.map((w: any) => {
+            const pct = Math.round(Number(w.pct) || 0);
+            return {
+              label: w.label,
+              used: pct,
+              cap: 100,
+              unit: "%" as const,
+              pct,
+              resetIn: fmtReset(w.resetsAt),
+            };
+          })
+        : [
+            {
+              label: "3h",
+              used: gw.messagesUsed,
+              cap: gw.messageCap,
+              unit: "msgs",
+              pct: gw.pctUsed,
+              resetIn: fiveHourReset(),
+            },
+          ];
     out.push({
-      service: "Codex",
+      service: "ChatGPT",
       brand: OPENAI_GREEN,
-      slug: "codex",
+      slug: "chatgpt",
       plan: gw.plan,
       authBadge: gw.hasOauth ? "OAuth" : gw.hasApiKey ? "API key" : "—",
       authIcon: gw.hasOauth ? ShieldCheck : KeyRound,
-      windows: [
-        {
-          label: "3h",
-          used: gw.messagesUsed,
-          cap: gw.messageCap,
-          unit: "msgs",
-          pct: gw.pctUsed,
-          resetIn: fiveHourReset(),
-        },
-      ],
+      windows: realWindows,
     });
   }
 
@@ -177,8 +204,9 @@ function buildServices(liveData: any): ServiceUsage[] {
   return out;
 }
 
-function fmt(value: number, unit: "msgs" | "$") {
+function fmt(value: number, unit: "msgs" | "$" | "%") {
   if (unit === "$") return `$${value.toFixed(value < 10 ? 2 : 0)}`;
+  if (unit === "%") return `${value}%`;
   return value.toLocaleString();
 }
 

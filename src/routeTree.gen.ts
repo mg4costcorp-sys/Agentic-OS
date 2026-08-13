@@ -14,6 +14,8 @@ import { Route as ShareRouteImport } from './routes/share'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MemoryRouteImport } from './routes/memory'
+import { Route as DesignRouteImport } from './routes/design'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CodegraphRouteImport } from './routes/codegraph'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
@@ -46,6 +48,16 @@ const SettingsRoute = SettingsRouteImport.update({
 const MemoryRoute = MemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignRoute = DesignRouteImport.update({
+  id: '/design',
+  path: '/design',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CodegraphRoute = CodegraphRouteImport.update({
@@ -93,6 +105,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/codegraph': typeof CodegraphRoute
+  '/dashboard': typeof DashboardRoute
+  '/design': typeof DesignRoute
   '/memory': typeof MemoryRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -108,6 +122,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/codegraph': typeof CodegraphRoute
+  '/dashboard': typeof DashboardRoute
+  '/design': typeof DesignRoute
   '/memory': typeof MemoryRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -124,6 +140,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/codegraph': typeof CodegraphRoute
+  '/dashboard': typeof DashboardRoute
+  '/design': typeof DesignRoute
   '/memory': typeof MemoryRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -141,6 +159,8 @@ export interface FileRouteTypes {
     | '/'
     | '/activity'
     | '/codegraph'
+    | '/dashboard'
+    | '/design'
     | '/memory'
     | '/settings'
     | '/setup'
@@ -156,6 +176,8 @@ export interface FileRouteTypes {
     | '/'
     | '/activity'
     | '/codegraph'
+    | '/dashboard'
+    | '/design'
     | '/memory'
     | '/settings'
     | '/setup'
@@ -171,6 +193,8 @@ export interface FileRouteTypes {
     | '/'
     | '/activity'
     | '/codegraph'
+    | '/dashboard'
+    | '/design'
     | '/memory'
     | '/settings'
     | '/setup'
@@ -187,6 +211,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivityRoute: typeof ActivityRoute
   CodegraphRoute: typeof CodegraphRoute
+  DashboardRoute: typeof DashboardRoute
+  DesignRoute: typeof DesignRoute
   MemoryRoute: typeof MemoryRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
@@ -234,6 +260,20 @@ declare module '@tanstack/react-router' {
       path: '/memory'
       fullPath: '/memory'
       preLoaderRoute: typeof MemoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design': {
+      id: '/design'
+      path: '/design'
+      fullPath: '/design'
+      preLoaderRoute: typeof DesignRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/codegraph': {
@@ -299,6 +339,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
   CodegraphRoute: CodegraphRoute,
+  DashboardRoute: DashboardRoute,
+  DesignRoute: DesignRoute,
   MemoryRoute: MemoryRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,

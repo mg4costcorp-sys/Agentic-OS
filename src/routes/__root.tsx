@@ -7,15 +7,13 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
 import appCss from "../styles.css?url";
-import { AppSidebar } from "@/components/app-sidebar";
-// Dark mode only — no theme toggle. The html element has class="dark" permanently.
-import { Bell } from "lucide-react";
+import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { HermesStatusPill } from "@/components/hermes-status-pill";
 import { VersionPill } from "@/components/version-pill";
-import { FloatingOracle } from "@/components/floating-oracle";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { OperatorJobs } from "@/components/operator-jobs";
 
 function NotFoundComponent() {
   return (
@@ -98,8 +96,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href:
-          "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..900,0..100,0..1&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..900,0..100,0..1&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap",
       },
     ],
   }),
@@ -111,8 +108,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Apply the stored theme before first paint — light is the default. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{if(localStorage.getItem("theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}',
+          }}
+        />
         <HeadContent />
       </head>
       <body>
@@ -126,34 +130,20 @@ function RootShell({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
-  // Dark mode is permanent — set in RootShell's <html className="dark">
-
-  // The floating Oracle guide — mounted after hydration (localStorage-backed
-  // toggle would otherwise mismatch the server render). Defaults ON so a
-  // fresh install discovers it; the header orb re-enables it once hidden.
-  const [oracleOn, setOracleOn] = useState(false);
-  const [oracleReady, setOracleReady] = useState(false);
-  useEffect(() => {
-    let on = true;
-    try { on = localStorage.getItem("os-oracle-on") !== "0"; } catch { /* privacy mode */ }
-    setOracleOn(on);
-    setOracleReady(true);
-  }, []);
-  const toggleOracle = (next: boolean) => {
-    setOracleOn(next);
-    try { localStorage.setItem("os-oracle-on", next ? "1" : "0"); } catch { /* ignore */ }
-  };
-
   return (
     <QueryClientProvider client={queryClient}>
       <div className="flex min-h-screen w-full bg-background text-foreground">
         <AppSidebar />
         <div className="flex flex-1 min-w-0 flex-col">
           <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/85 px-4 backdrop-blur-md md:px-6">
-            <div className="flex items-center gap-2.5 text-sm">
-              <span className="font-medium tracking-tight">Operator</span>
-              <span className="text-muted-foreground/50">/</span>
-              <span className="text-muted-foreground tracking-tight">local</span>
+            <div className="flex items-center gap-2 text-sm min-w-0">
+              <MobileNav />
+              {/* On mobile the sidebar drawer already shows Operator/local
+                  in its identity block, so we hide this redundant crumb
+                  to keep room for the right-side pills. */}
+              <span className="hidden sm:inline font-medium tracking-tight">Operator</span>
+              <span className="hidden sm:inline text-muted-foreground/50">/</span>
+              <span className="hidden sm:inline text-muted-foreground tracking-tight">local</span>
               <VersionPill />
             </div>
             <div className="flex items-center gap-2.5">
@@ -161,27 +151,8 @@ function RootComponent() {
                   to /agents/hermes. Renders nothing when Hermes isn't
                   installed so the bar stays clean for users without it. */}
               <HermesStatusPill />
-              {/* Oracle toggle — shows/hides the floating guide orb. */}
-              <button
-                onClick={() => toggleOracle(!oracleOn)}
-                title={oracleOn ? "Hide the Oracle guide" : "Show the Oracle guide"}
-                className="rounded-md p-2 transition-colors hover:bg-accent"
-              >
-                <span
-                  aria-hidden
-                  className="block h-3.5 w-3.5 rounded-full transition-all"
-                  style={{
-                    background: oracleOn
-                      ? "radial-gradient(circle at 35% 35%, #d8fff3, #7be0c8 55%, #0d5c4a)"
-                      : "radial-gradient(circle at 35% 35%, #6b7280, #374151 60%, #111827)",
-                    boxShadow: oracleOn ? "0 0 10px rgba(123,224,200,0.75)" : "none",
-                  }}
-                />
-              </button>
-              <button className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-                <Bell className="h-4 w-4" />
-              </button>
-              {/* Dark mode only — no theme toggle */}
+              <OperatorJobs />
+              <ThemeToggle />
             </div>
           </header>
           <main className="flex-1 overflow-x-hidden p-4 md:p-6">
@@ -189,7 +160,6 @@ function RootComponent() {
           </main>
         </div>
       </div>
-      {oracleReady && <FloatingOracle enabled={oracleOn} onDisable={() => toggleOracle(false)} />}
     </QueryClientProvider>
   );
 }

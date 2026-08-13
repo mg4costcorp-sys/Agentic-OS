@@ -41,6 +41,59 @@ function parsePrice(perToken?: string): number | null {
   return Math.round(perM * 1000) / 1000;
 }
 
+// Vendor id → display name + the vendorKey the UI uses for brand logos.
+const VENDORS: Record<string, { name: string; key: string }> = {
+  anthropic: { name: "Anthropic", key: "claude" },
+  openai: { name: "OpenAI", key: "openai" },
+  google: { name: "Google", key: "gemini" },
+  "x-ai": { name: "xAI", key: "xai" },
+  moonshotai: { name: "Moonshot AI", key: "moonshot" },
+  minimax: { name: "MiniMax", key: "minimax" },
+  "meta-llama": { name: "Meta", key: "meta" },
+  mistralai: { name: "Mistral", key: "mistral" },
+  deepseek: { name: "DeepSeek", key: "deepseek" },
+  qwen: { name: "Qwen", key: "qwen" },
+  "z-ai": { name: "Z.ai", key: "zai" },
+  cohere: { name: "Cohere", key: "cohere" },
+};
+
+// Brand acronyms that must not be title-cased into "Gpt" / "Glm".
+const ACRONYMS = new Set(["gpt", "glm", "ai", "llm", "moe", "vl", "xl"]);
+
+function prettyName(slug: string): string {
+  const parts = slug.split("-").map((p) => {
+    if (ACRONYMS.has(p.toLowerCase())) return p.toUpperCase();
+    if (/^\d/.test(p) || p.length <= 2) return p.toUpperCase();
+    return p[0].toUpperCase() + p.slice(1);
+  });
+  // "GPT 5.6" reads wrong — brands hyphenate the acronym to its version number.
+  return parts
+    .join(" ")
+    .replace(/\b(GPT|GLM) (\d)/g, "$1-$2");
+}
+
+function prettyCtx(n: number | null): string | null {
+  if (!n) return null;
+  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)}M context`;
+  return `${Math.round(n / 1000)}K context`;
+}
+
+/**
+ * Parse `--add id[,id…]` (also accepts `--add=id,id`). Adding a model pulls ONLY
+ * verifiable facts from OpenRouter — pricing and context window — into the
+ * `upAndComing` list, which has no benchmark/sentiment fields. Benchmarks and
+ * editorial judgement are never auto-generated: inventing them would be worse
+ * than leaving them out.
+ */
+function parseAddFlag(): string[] {
+  const argv = process.argv.slice(2);
+  const eq = argv.find((a) => a.startsWith("--add="));
+  if (eq) return eq.slice(6).split(",").map((s) => s.trim()).filter(Boolean);
+  const i = argv.indexOf("--add");
+  if (i !== -1 && argv[i + 1]) return argv[i + 1].split(",").map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+
 async function main() {
   console.log("→ fetching OpenRouter catalog (no key needed)…");
   const res = await fetch(CATALOG_URL);
@@ -74,12 +127,71 @@ async function main() {
     if (inP != null || outP != null || ctx != null) priced++;
   }
 
+  // --add: pull new models in with verifiable facts only (price + context).
+  const toAdd = parseAddFlag();
+  const added: string[] = [];
+  if (toAdd.length) {
+    const upcoming: any[] = Array.isArray(doc.upAndComing)
+      ? doc.upAndComing
+      : (doc.upAndComing = []);
+    const tracked = new Set(
+      [...models, ...upcoming].map((m: any) => m.openrouterId).filter(Boolean),
+    );
+    for (const id of toAdd) {
+      const live = byId.get(id);
+      if (!live) {
+        console.log(`   ! ${id} — not on OpenRouter, skipped`);
+        continue;
+      }
+      if (tracked.has(id)) {
+        console.log(`   = ${id} — already tracked, skipped`);
+        continue;
+      }
+      const [vendorId, ...rest] = id.split("/");
+      const slug = rest.join("/") || id;
+      const vendor = VENDORS[vendorId] ?? {
+        name: prettyName(vendorId),
+        key: vendorId.replace(/[^a-z0-9]/gi, ""),
+      };
+      const inP = parsePrice(live.pricing?.prompt);
+      const outP = parsePrice(live.pricing?.completion);
+      const ctx =
+        typeof live.context_length === "number" && live.context_length > 0
+          ? live.context_length
+          : null;
+      // Strictly factual — no claims we can't verify from the catalog.
+      const facts = [
+        prettyCtx(ctx),
+        inP != null && outP != null ? `$${inP}/$${outP} per M tokens` : null,
+      ].filter(Boolean);
+      upcoming.push({
+        id: slug,
+        name: prettyName(slug),
+        vendor: vendor.name,
+        vendorKey: vendor.key,
+        openrouterId: id,
+        expected: "Available now",
+        why: facts.length
+          ? `${facts.join(" · ")} (live OpenRouter pricing). Not yet reviewed — benchmarks and verdict pending.`
+          : "Newly listed on OpenRouter. Not yet reviewed.",
+        link: `https://openrouter.ai/${id}`,
+      });
+      tracked.add(id);
+      added.push(id);
+    }
+  }
+
   const now = new Date().toISOString();
   if (doc.freshness?.live) doc.freshness.live.fetchedAt = now;
   doc.generatedAt = now;
 
   writeFileSync(JSON_PATH, JSON.stringify(doc, null, 2) + "\n");
   console.log(`✓ refreshed price/context for ${priced}/${models.length} models → ${JSON_PATH}`);
+  if (added.length) {
+    console.log(`✓ added ${added.length} model(s) to upAndComing with live price/context:`);
+    for (const a of added) console.log(`   + ${a}`);
+    console.log("  (facts only — add benchmarks/verdict by hand when you've formed one.)");
+  }
 
   // CURATION TODO — the parts a human still owns.
   const known = new Set(models.map((m) => m.openrouterId).filter(Boolean));

@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { ChevronDown, Keyboard, Mic, MicOff, Send, Square, X } from "lucide-react";
+import { ChevronDown, Keyboard, Mic, MicOff, Play, Send, Square, Volume2, X } from "lucide-react";
 import { OraclePlasma } from "@/components/oracle-plasma";
 import { SyntheticVoice } from "@/lib/synthetic-voice";
 
@@ -32,6 +32,18 @@ function shortName(name: string): string {
 }
 const VOICE_HEALTH_URL = "http://localhost:8099/api/health";
 const VOICE_TOKEN_URL = "http://localhost:8099/api/session";
+const VOICE_SAMPLE_URL = "http://localhost:8099/api/sample";
+// The realtime voices the user can pick for the call (OpenAI Realtime set).
+const ORACLE_VOICES = [
+  { id: "sage", label: "Sage", vibe: "soft · measured" },
+  { id: "cedar", label: "Cedar", vibe: "warm · natural" },
+  { id: "marin", label: "Marin", vibe: "bright · friendly" },
+  { id: "coral", label: "Coral", vibe: "lively · warm" },
+  { id: "alloy", label: "Alloy", vibe: "neutral · clear" },
+  { id: "ash", label: "Ash", vibe: "calm · low" },
+  { id: "verse", label: "Verse", vibe: "expressive" },
+  { id: "ballad", label: "Ballad", vibe: "gentle" },
+];
 
 type OracleMode = "dormant" | "listening" | "thinking" | "talking" | "working";
 // The portal's exact state grammar — the orb, label and glow all follow it.
@@ -345,6 +357,52 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
   const [connecting, setConnecting] = useState(false); // key → /__start_voice in flight
   const [setupErr, setSetupErr] = useState("");
   const [micMuted, setMicMuted] = useState(false);     // pause the mic without dropping the call
+  // Brain mode: when the full-screen Memory Brain opens it fires `brain:open`,
+  // and we relocate from the bottom-right corner to a centered anchor at the
+  // base of the canvas, rising above the Brain (z above its 9998). The same
+  // engine simply docks into the immersive space instead of clipping the
+  // corner — that's how the orb and full-screen memory mode are squared.
+  const [brainMode, setBrainMode] = useState(false);
+  useEffect(() => {
+    // Entering the Brain: relocate to the centered bottom anchor AND collapse
+    // to the orb, so the immersive graph stays unobstructed. The orb is the
+    // invitation to talk — one tap opens the console upward from the base.
+    const onOpen = () => { setBrainMode(true); setOpen(false); };
+    const onClose = () => setBrainMode(false);
+    window.addEventListener("brain:open", onOpen);
+    window.addEventListener("brain:close", onClose);
+    return () => {
+      window.removeEventListener("brain:open", onOpen);
+      window.removeEventListener("brain:close", onClose);
+    };
+  }, []);
+  const [voicePref, setVoicePref] = useState<string>(() => {
+    try { return localStorage.getItem("os-oracle-voice") || "sage"; } catch { return "sage"; }
+  });
+  const [voiceMenu, setVoiceMenu] = useState(false);
+  const [samplingVoice, setSamplingVoice] = useState<string | null>(null);
+  function pickVoice(id: string) {
+    setVoicePref(id);
+    try { localStorage.setItem("os-oracle-voice", id); } catch { /* ignore */ }
+  }
+  async function playSample(id: string) {
+    setSamplingVoice(id);
+    try {
+      const r = await fetch(VOICE_SAMPLE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voice: id }),
+      });
+      if (!r.ok) throw new Error("sample failed");
+      const blob = await r.blob();
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.onended = () => setSamplingVoice(null);
+      audio.onerror = () => setSamplingVoice(null);
+      await audio.play();
+    } catch {
+      setSamplingVoice(null); // engine down / no key → silent no-op
+    }
+  }
   // Persist a freshly-entered key to ~/.hermes/.env via /__start_voice (which
   // also boots voice-lab), THEN start the call. This makes voice "just work"
   // from the widget itself — no hop to the portal — and the key sticks across
@@ -733,12 +791,15 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
     } catch { keyed = false; }
     let savedKey = "";
     try { savedKey = localStorage.getItem("hermes-openai-key") || ""; } catch { /* ignore */ }
-    // If the local engine isn't already keyed and this browser has no saved
-    // key, the key may STILL live in ~/.hermes/.env — set up once via this
-    // widget, the Intelligence portal, or a shell export. Ask the dashboard
-    // to boot voice-lab from that persisted key BEFORE prompting for setup,
-    // so a fresh browser / new port / restart never re-asks. (localStorage is
-    // per-port, but ~/.hermes/.env is the one durable home for the key.)
+    // Whenever the engine isn't already up + keyed, BOOT it via /__start_voice
+    // before trying to mint a token — otherwise we'd open a call against a dead
+    // engine and fail with "couldn't start" even though the key is saved.
+    // /__start_voice is idempotent: it reloads the key from ~/.hermes/.env (or
+    // uses the browser's saved key if we pass one), spawns voice-lab, and
+    // returns once it's healthy. This is the durable path — a fresh browser,
+    // new port, or restart all "just work" because ~/.hermes/.env is the one
+    // home for the key. We only prompt for setup if there's genuinely no key
+    // anywhere.
     if (!keyed) {
       try {
         let token: string | null = null;
@@ -746,7 +807,7 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
         const boot = await fetch("/__start_voice", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...(token ? { "X-Claude-OS-Token": token } : {}) },
-          body: JSON.stringify(savedKey ? { key: savedKey } : {}), // reload from ~/.hermes/.env, or use the saved key
+          body: JSON.stringify(savedKey ? { key: savedKey } : {}),
         }).then((r) => r.json()).catch(() => null);
         if (boot && boot.keyed) { keyed = true; savedKey = ""; }
       } catch { /* fall through to setup */ }
@@ -759,7 +820,7 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
       const s = await fetch(VOICE_TOKEN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ voice: "sage", mode: "companion", ...(savedKey && !keyed ? { key: savedKey } : {}) }),
+        body: JSON.stringify({ voice: voicePref, mode: "companion", ...(savedKey && !keyed ? { key: savedKey } : {}) }),
       }).then((r) => r.json());
       if (!s.value) throw new Error("no token");
       const pc = new RTCPeerConnection();
@@ -871,6 +932,24 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
       return;
     }
 
+    // focus_memory → open the Memory brain focused on the query. The page
+    // reads ?focus=… : flies the 3D graph to the matching cluster and opens
+    // the results panel with copyable documents.
+    if (c.name === "focus_memory") {
+      let query = "";
+      try { query = String(JSON.parse(c.arguments || "{}").query || "").trim(); } catch { /* malformed */ }
+      if (query) {
+        try {
+          void router.navigate({ to: "/memory", search: { focus: query } as any });
+        } catch { /* ignore */ }
+        fireChips(`memory recall ${query}`);
+        reply(`Pulled up the user's "${query}" memories — the brain flew to that cluster and the matching documents are listed for them to click and copy. Tell them it's ready and they can read it or say "read it aloud".`);
+      } else {
+        reply("Ask the user what topic to pull up.");
+      }
+      return;
+    }
+
     // ask_hermes (default) → run the REAL agent, feed the result back to speak.
     let request = "";
     try { request = JSON.parse(c.arguments || "{}").request || ""; } catch { /* malformed args */ }
@@ -898,6 +977,24 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
   useEffect(() => () => endCall(), []);
   useEffect(() => { if (!enabled && callStateRef.current !== "off") endCall(); }, [enabled]);
 
+  // Other parts of the OS (e.g. a "Talk to your memory" button on the Memory
+  // page) can open + activate the Oracle without a second widget. A ref keeps
+  // the listener pointed at the latest startVoice across renders.
+  const startVoiceRef = useRef(startVoice);
+  startVoiceRef.current = startVoice;
+  useEffect(() => {
+    const onActivate = (e: any) => {
+      setOpen(true);
+      if (e?.detail?.voice && callStateRef.current === "off") {
+        window.setTimeout(() => void startVoiceRef.current(), 450);
+      } else if (e?.detail?.focus) {
+        window.setTimeout(() => inputRef.current?.focus(), 300);
+      }
+    };
+    window.addEventListener("oracle:activate", onActivate as EventListener);
+    return () => window.removeEventListener("oracle:activate", onActivate as EventListener);
+  }, []);
+
   if (!enabled) return null;
 
   const orbColor = MODE_COLOR[oMode];
@@ -905,7 +1002,14 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
   const statusLabel = callState === "connecting" ? "connecting…" : live ? `live · ${MODE_LABEL[oMode]}` : oMode === "dormant" ? MODE_LABEL.dormant : MODE_LABEL[oMode];
 
   return (
-    <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3" style={{ maxWidth: "min(384px, calc(100vw - 2rem))" }}>
+    <div
+      className={
+        brainMode
+          ? "fixed bottom-6 left-6 z-[10000] flex flex-col items-start gap-3"
+          : "fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3"
+      }
+      style={{ maxWidth: "min(384px, calc(100vw - 2rem))" }}
+    >
       {open && (
         <div
           className="w-[384px] max-w-full rounded-2xl border border-border bg-card/95 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col"
@@ -978,6 +1082,52 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
                 stays live — the red dot on the orb shows it). Fully hiding
                 the Oracle lives on the header's teal dot only, so a stray X
                 can never make the whole thing vanish. */}
+            {/* voice picker — choose the call voice, hear a sample */}
+            <div className="relative">
+              <button
+                onClick={() => setVoiceMenu((v) => !v)}
+                title={`Call voice: ${ORACLE_VOICES.find((v) => v.id === voicePref)?.label ?? voicePref} — click to change`}
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <Volume2 className="h-4 w-4" />
+              </button>
+              {voiceMenu && (
+                <div
+                  className="absolute right-0 top-full mt-1 z-50 w-52 max-h-72 overflow-y-auto rounded-lg border border-border bg-card shadow-2xl py-1"
+                  style={{ boxShadow: "0 18px 50px rgba(0,0,0,0.6)" }}
+                >
+                  <div className="px-3 py-1.5 text-[9px] uppercase tracking-[0.16em] text-muted-foreground/60">Call voice</div>
+                  {ORACLE_VOICES.map((v) => {
+                    const active = v.id === voicePref;
+                    return (
+                      <div
+                        key={v.id}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent transition-colors"
+                        style={{ background: active ? "rgba(123,224,200,0.10)" : undefined }}
+                      >
+                        <button onClick={() => pickVoice(v.id)} className="flex-1 min-w-0 text-left">
+                          <span className="text-[12px] block truncate" style={{ color: active ? TEAL : undefined }}>{v.label}</span>
+                          <span className="text-[9px] text-muted-foreground block truncate">{v.vibe}</span>
+                        </button>
+                        <button
+                          onClick={() => void playSample(v.id)}
+                          title={`Hear ${v.label}`}
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground"
+                        >
+                          {samplingVoice === v.id
+                            ? <span className="block h-3 w-3 rounded-full animate-pulse" style={{ background: TEAL }} />
+                            : <Play className="h-3 w-3" />}
+                        </button>
+                        {active && <span style={{ color: TEAL }} className="shrink-0 text-[11px]">✓</span>}
+                      </div>
+                    );
+                  })}
+                  <div className="px-3 py-1.5 text-[8.5px] text-muted-foreground/50 border-t border-border/40 mt-1">
+                    applies to your next voice call
+                  </div>
+                </div>
+              )}
+            </div>
             <button onClick={() => { setOpen(false); syncToHermes(); }} title="Minimize to orb — I keep running" className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
               <X className="h-4 w-4" />
             </button>
@@ -987,21 +1137,40 @@ export function FloatingOracle({ enabled }: { enabled: boolean; onDisable?: () =
           <div ref={transcriptRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             {turns.length === 0 && !caption && !voiceSetup && (
               <div className="space-y-3">
-                {/* mode chooser — voice line or text chat, same brain either way */}
+                {/* mode chooser — voice line (primary, teal) vs text chat
+                    (secondary, neutral). Distinct treatments so it's obvious
+                    which is which at a glance. */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => void startVoice()}
-                    className="rounded-xl border border-border/70 bg-background/40 px-3 py-3.5 text-left hover:border-foreground/25 hover:bg-accent transition-colors"
+                    className="group relative rounded-xl px-3 py-3.5 text-left transition-all"
+                    style={{
+                      border: `1px solid ${TEAL}66`,
+                      background: `linear-gradient(160deg, ${TEAL}1f, ${TEAL}0a)`,
+                      boxShadow: `0 0 0 0 ${TEAL}`,
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.boxShadow = `0 0 22px -6px ${TEAL}`)}
+                    onMouseLeave={(e) => (e.currentTarget.style.boxShadow = `0 0 0 0 ${TEAL}`)}
                   >
-                    <Mic className="h-4 w-4 mb-1.5" style={{ color: TEAL }} />
-                    <div className="text-xs font-semibold">Voice line</div>
-                    <div className="text-[10px] text-muted-foreground leading-snug mt-0.5">Talk live — zero-latency, hands-free</div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="grid place-items-center h-7 w-7 rounded-full" style={{ background: `${TEAL}22` }}>
+                        <Mic className="h-4 w-4" style={{ color: TEAL }} />
+                      </span>
+                      <span className="text-[8px] uppercase tracking-[0.16em] font-semibold" style={{ color: TEAL }}>talk</span>
+                    </div>
+                    <div className="text-xs font-semibold" style={{ color: TEAL }}>Voice line</div>
+                    <div className="text-[10px] text-muted-foreground leading-snug mt-0.5">Live call — zero-latency, hands-free</div>
                   </button>
                   <button
                     onClick={() => inputRef.current?.focus()}
-                    className="rounded-xl border border-border/70 bg-background/40 px-3 py-3.5 text-left hover:border-foreground/25 hover:bg-accent transition-colors"
+                    className="rounded-xl border border-border/70 bg-background/30 px-3 py-3.5 text-left hover:border-foreground/25 hover:bg-accent transition-colors"
                   >
-                    <Keyboard className="h-4 w-4 mb-1.5 text-muted-foreground" />
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="grid place-items-center h-7 w-7 rounded-full bg-foreground/[0.06]">
+                        <Keyboard className="h-4 w-4 text-muted-foreground" />
+                      </span>
+                      <span className="text-[8px] uppercase tracking-[0.16em] font-semibold text-muted-foreground/60">type</span>
+                    </div>
                     <div className="text-xs font-semibold">Text chat</div>
                     <div className="text-[10px] text-muted-foreground leading-snug mt-0.5">Type instead — private, no voice account</div>
                   </button>

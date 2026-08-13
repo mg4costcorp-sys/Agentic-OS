@@ -1,5 +1,6 @@
 {
   "name": "claude-os",
+  "version": "3.0.0",
   "description": "A one-page, read-only operator console for your AI tool stack.",
   "author": "Jack Roberts",
   "license": "SEE LICENSE IN LICENSE",

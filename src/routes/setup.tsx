@@ -26,7 +26,7 @@ import cadenceMorning from "@/assets/dream/cadence-morning.png";
 import cadenceEvening from "@/assets/dream/cadence-evening.png";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Home } from "./index";
+import { Home } from "./dashboard";
 import confetti from "canvas-confetti";
 import { useLiveData } from "@/lib/use-live-data";
 import {

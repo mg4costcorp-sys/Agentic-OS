@@ -8,8 +8,9 @@ import {
   type MemorySource,
 } from "@/lib/mock-data";
 import { useLiveData } from "@/lib/use-live-data";
-import { lazy, Suspense, useMemo, useState } from "react";
-import { FileText, AlertTriangle, RefreshCw, X, Pencil, Cloud, Search } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { FileText, AlertTriangle, RefreshCw, X, Pencil, Cloud, Search, Copy, Check, Maximize2 } from "lucide-react";
+import { MemoryBrain } from "@/components/memory-brain";
 import type { MemNode } from "@/components/memory-graph-3d";
 import { MemoryGraphLoader } from "@/components/memory-graph-loader";
 import { KnowledgeExplorer, type KnowledgeGraph } from "@/components/knowledge-explorer";
@@ -21,6 +22,11 @@ import pineconeIconSvg from "@/assets/logos/pinecone-icon.svg";
 const MemoryGraph3D = lazy(() => import("@/components/memory-graph-3d"));
 
 export const Route = createFileRoute("/memory")({
+  // ?focus=<query> — voice/text can deep-link the Memory brain to a topic:
+  // the graph flies to the matching cluster and the results panel opens.
+  validateSearch: (search: Record<string, unknown>): { focus?: string } => ({
+    focus: typeof search.focus === "string" ? search.focus : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Memory — Claude Code OS" },
@@ -41,7 +47,25 @@ type SourceId = "obsidian" | "claude" | "pinecone";
 
 function MemoryPage() {
   const [selected, setSelected] = useState<MemNode | null>(null);
+  const [brainOpen, setBrainOpen] = useState(false);
   const [activityQuery, setActivityQuery] = useState("");
+  // Voice/text "pull up my X" deep-links here as ?focus=X. We mirror it into
+  // state so the graph fly + explorer focus fire on arrival AND whenever the
+  // query changes, then strip it from the URL so a manual reload is clean.
+  const routeSearch = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const [focusQuery, setFocusQuery] = useState<string>("");
+  const [focusNonce, setFocusNonce] = useState(0);
+  useEffect(() => {
+    const f = (routeSearch?.focus ?? "").trim();
+    if (!f) return;
+    setFocusQuery(f);
+    setFocusNonce((n) => n + 1);
+    // Voice "pull up my X" → land in the immersive Brain, not just the page.
+    setBrainOpen(true);
+    // strip ?focus= from the URL (keep the state) so refresh doesn't re-fire.
+    void navigate({ search: (prev: any) => ({ ...prev, focus: undefined }), replace: true });
+  }, [routeSearch?.focus, navigate]);
   const liveData = useLiveData();
   const ld = liveData as any;
   const hasPinecone = (ld?.memory?.stats?.pineconeIndexes ?? 0) > 0 || ld?.detection?.memoryStores?.pinecone?.hasKey === true;
@@ -280,7 +304,7 @@ function MemoryPage() {
       </div>
 
       <section className="rounded-xl border border-border bg-card overflow-hidden mb-10 relative">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground mb-1">
               Memory graph · 3D
@@ -290,7 +314,27 @@ function MemoryPage() {
               indexes
             </div>
           </div>
-          <Legend />
+          <div className="flex items-center gap-3">
+            {/* Single entry to full-screen memory. Voice lives INSIDE the Brain
+                (the corner Oracle relocates in as its console), so there's one
+                door here — no "enter" vs "talk" duplication. */}
+            <button
+              onClick={() => setBrainOpen(true)}
+              className="inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-semibold transition-all shrink-0"
+              style={{
+                border: "1px solid rgba(61,220,151,0.5)",
+                background: "linear-gradient(160deg, rgba(61,220,151,0.16), rgba(61,220,151,0.05))",
+                color: "#3ddc97",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 0 22px -6px #3ddc97")}
+              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
+              title="Enter the Brain — full-screen memory, click any cluster to grab it, talk to it hands-free"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+              Enter the Brain
+            </button>
+            <Legend />
+          </div>
         </div>
 
         <div
@@ -301,9 +345,15 @@ function MemoryPage() {
             boxShadow: "inset 0 0 160px rgba(61,220,151,0.08)",
           }}
         >
-          <Suspense fallback={<MemoryGraphLoader height={640} />}>
-            <MemoryGraph3D onSelect={setSelected} sourceFilter={graphFilter} />
-          </Suspense>
+          {/* Unmount the page graph while the full-screen Brain is open — two
+              live WebGL force-graphs at once tanked the frame rate. */}
+          {brainOpen ? (
+            <MemoryGraphLoader height={640} />
+          ) : (
+            <Suspense fallback={<MemoryGraphLoader height={640} />}>
+              <MemoryGraph3D onSelect={setSelected} sourceFilter={graphFilter} focusQuery={focusQuery} focusNonce={focusNonce} />
+            </Suspense>
+          )}
         </div>
       </section>
 
@@ -348,9 +398,19 @@ function MemoryPage() {
 
       {/* Knowledge explorer — the relational layer: walk the vault's
           wikilink graph note-by-note like a knowledge base. */}
-      <KnowledgeExplorer graphs={knowledgeGraphs} isDemo={knowledgeIsDemo} />
+      <KnowledgeExplorer graphs={knowledgeGraphs} isDemo={knowledgeIsDemo} focusQuery={focusQuery} focusNonce={focusNonce} />
 
       {selected && <Inspector node={selected} onClose={() => setSelected(null)} />}
+      {brainOpen && (
+        <MemoryBrain
+          graphs={knowledgeGraphs}
+          isDemo={knowledgeIsDemo}
+          hasPinecone={hasPinecone}
+          focusQuery={focusQuery}
+          focusNonce={focusNonce}
+          onClose={() => setBrainOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -510,6 +570,34 @@ function EventRow({ event: e }: { event: (typeof memoryEvents)[number] }) {
 
 function Inspector({ node, onClose }: { node: MemNode; onClose: () => void }) {
   const ws = node.workspaceId ? workspaces.find((w) => w.id === node.workspaceId) : null;
+  // Copy the node's content — the full file body if it resolves in an Obsidian
+  // vault (via /__memory_note using the node name as the note id), else the
+  // preview. This is the "click a node → grab it" beat from the reference.
+  const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const copyable = node.kind === "file" || node.kind === "decision" || !!node.preview;
+  const copyNode = async () => {
+    setCopying(true);
+    let content = node.preview ?? node.name ?? "";
+    try {
+      const r = await fetch(
+        `/__memory_note?vault=&id=${encodeURIComponent((node.name ?? "").replace(/\.md$/i, ""))}`,
+      ).then((res) => res.json());
+      if (r?.ok && typeof r.content === "string" && r.content.length > 0) content = r.content;
+    } catch { /* fall back to preview */ }
+    let ok = false;
+    try { await navigator.clipboard.writeText(content); ok = true; }
+    catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = content; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select(); ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { /* give up */ }
+    }
+    setCopying(false);
+    if (ok) { setCopied(true); window.setTimeout(() => setCopied(false), 1600); }
+  };
   return (
     <div
       className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-background/60 backdrop-blur-sm animate-fade-in"
@@ -551,9 +639,27 @@ function Inspector({ node, onClose }: { node: MemNode; onClose: () => void }) {
               </div>
             )}
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {copyable && (
+              <button
+                onClick={() => void copyNode()}
+                disabled={copying}
+                className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:opacity-50"
+                style={{
+                  borderColor: copied ? "#3ddc97" : "rgba(255,255,255,0.14)",
+                  background: copied ? "rgba(61,220,151,0.12)" : "rgba(255,255,255,0.03)",
+                  color: copied ? "#3ddc97" : undefined,
+                }}
+                title="Copy this memory to your clipboard"
+              >
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Copied" : copying ? "Reading…" : "Copy"}
+              </button>
+            )}
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {node.kind === "file" && node.preview && (

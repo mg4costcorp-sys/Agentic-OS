@@ -4,20 +4,32 @@
     {
       "name": "claude-os",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 8081
     },
     {
       "name": "voice-lab",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["run", "voice-lab/server.ts"],
+      "runtimeArgs": [
+        "run",
+        "voice-lab/server.ts"
+      ],
       "port": 8099
     },
     {
-      "name": "claude-os-verify",
+      "name": "claude-os-8082",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "dev", "--port", "8090"],
-      "port": 8090
+      "runtimeArgs": [
+        "vite",
+        "dev",
+        "--port",
+        "8082",
+        "--strictPort"
+      ],
+      "port": 8082
     }
   ]
 }

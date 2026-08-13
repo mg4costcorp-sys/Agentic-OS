@@ -10,7 +10,7 @@
  * bare title. Data comes from scripts/aggregate.ts (memory.knowledge);
  * ships with demo data so a fresh clone renders keyless.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   X,
@@ -22,6 +22,8 @@ import {
   Users,
   Lightbulb,
   FileText,
+  Copy,
+  Check,
 } from "lucide-react";
 import { PALETTE, colorForCommunity } from "@/components/graphify-graph-3d";
 
@@ -78,15 +80,54 @@ type Crumb = { t: "themes" } | { t: "theme"; tag: string } | { t: "note"; id: st
 export function KnowledgeExplorer({
   graphs,
   isDemo,
+  focusQuery = "",
+  focusNonce = 0,
 }: {
   graphs: KnowledgeGraph[];
   isDemo: boolean;
+  /** Voice/text "pull up my X" drives this — searches, switches to the
+   *  best-matching vault, scrolls into view, and pulses. */
+  focusQuery?: string;
+  focusNonce?: number;
 }) {
   const [vaultIdx, setVaultIdx] = useState(0);
   const [query, setQuery] = useState("");
   const [stack, setStack] = useState<Crumb[]>([{ t: "themes" }]);
   const [showAllThemes, setShowAllThemes] = useState(false);
+  const [pulse, setPulse] = useState(false);
+  const rootRef = useRef<HTMLElement>(null);
   const data = graphs[Math.min(vaultIdx, graphs.length - 1)];
+
+  // Voice/text focus: pick the vault with the most matches for the query,
+  // switch to it, run the search, scroll the panel into view, and pulse.
+  useEffect(() => {
+    const fq = focusQuery.trim();
+    if (!fq || focusNonce <= 0) return;
+    const ql = fq.toLowerCase();
+    const score = (g: KnowledgeGraph) =>
+      g.notes.filter(
+        (n) =>
+          n.title.toLowerCase().includes(ql) ||
+          n.tags.some((t) => t.toLowerCase().includes(ql)) ||
+          (n.excerpt ?? "").toLowerCase().includes(ql),
+      ).length;
+    let best = 0;
+    let bestScore = -1;
+    graphs.forEach((g, i) => {
+      const s = score(g);
+      if (s > bestScore) { bestScore = s; best = i; }
+    });
+    setVaultIdx(best);
+    setStack([{ t: "themes" }]);
+    setShowAllThemes(false);
+    setQuery(fq);
+    setPulse(true);
+    const t1 = window.setTimeout(() => {
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+    const t2 = window.setTimeout(() => setPulse(false), 1600);
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+  }, [focusNonce, focusQuery, graphs]);
 
   const { byId, inbound, degree, typeCommunity, themes } = useMemo(() => {
     const byId = new Map(data.notes.map((n) => [n.id, n]));
@@ -175,7 +216,14 @@ export function KnowledgeExplorer({
         : truncate(cleanTitle(byId.get(c.id)?.title ?? c.id), 30);
 
   return (
-    <section className="rounded-xl border border-border bg-card overflow-hidden mt-8">
+    <section
+      ref={rootRef}
+      className="rounded-xl border bg-card overflow-hidden mt-8 transition-all duration-500"
+      style={{
+        borderColor: pulse ? ACCENT : undefined,
+        boxShadow: pulse ? `0 0 0 1px ${ACCENT}, 0 0 40px -8px ${ACCENT}` : undefined,
+      }}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
         <div>
           <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground mb-1 inline-flex items-center gap-2">
@@ -298,6 +346,7 @@ export function KnowledgeExplorer({
         ) : (
           <NoteView
             note={byId.get(current.id)}
+            vaultName={data.vault}
             byId={byId}
             inbound={inbound.get(current.id) ?? []}
             degree={degree}
@@ -589,6 +638,7 @@ function NoteCard({
 
 function NoteView({
   note,
+  vaultName,
   byId,
   inbound,
   degree,
@@ -597,6 +647,7 @@ function NoteView({
   onNote,
 }: {
   note: KnowledgeNote | undefined;
+  vaultName: string;
   byId: Map<string, KnowledgeNote>;
   inbound: string[];
   degree: Map<string, number>;
@@ -604,6 +655,70 @@ function NoteView({
   onTheme: (tag: string) => void;
   onNote: (id: string) => void;
 }) {
+  // Full document: the graph only carries an excerpt, so we fetch the real
+  // markdown body from the vault on demand (view or copy). This is the
+  // "click in → grab the whole document" payoff of the voice recall.
+  const [full, setFull] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const loadFull = async (): Promise<string | null> => {
+    if (full != null) return full;
+    if (!note) return null;
+    setLoading(true);
+    setErr("");
+    try {
+      const r = await fetch(
+        `/__memory_note?vault=${encodeURIComponent(vaultName)}&id=${encodeURIComponent(note.id)}`,
+      ).then((res) => res.json());
+      if (r?.ok && typeof r.content === "string") {
+        setFull(r.content);
+        return r.content;
+      }
+      throw new Error(r?.error || "not found");
+    } catch (e: any) {
+      setErr(e?.message === "note not found" ? "Couldn't locate this file in the vault." : "Couldn't read the document.");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+  const copyDoc = async () => {
+    const content = (await loadFull()) ?? note?.excerpt ?? "";
+    if (!content) return;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(content);
+      ok = true;
+    } catch {
+      // Fallback for contexts where the async clipboard API is blocked
+      // (older browsers, some embedded views): a hidden textarea + execCommand.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = content;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { /* give up silently */ }
+    }
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    }
+  };
+  const toggleShow = async () => {
+    if (!show) await loadFull();
+    setShow((s) => !s);
+  };
+  // Reset the loaded body when switching notes.
+  const noteId = note?.id;
+  useEffect(() => { setFull(null); setShow(false); setErr(""); setCopied(false); }, [noteId]);
+
   if (!note) return <p className="text-xs text-muted-foreground">Note not found.</p>;
   const backlinks = inbound.filter((id) => byId.has(id));
   return (
@@ -626,7 +741,41 @@ function NoteView({
           </div>
         </div>
 
-        {note.excerpt && (
+        {/* Document actions — copy the whole file, or read it inline. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void copyDoc()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+            style={{
+              borderColor: copied ? ACCENT : "rgba(255,255,255,0.14)",
+              background: copied ? "rgba(61,220,151,0.12)" : "rgba(255,255,255,0.03)",
+              color: copied ? ACCENT : undefined,
+            }}
+            title="Copy the full document to your clipboard"
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? "Copied" : loading ? "Reading…" : "Copy document"}
+          </button>
+          <button
+            onClick={() => void toggleShow()}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:border-foreground/25 transition-colors"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            {show ? "Hide full document" : "Read full document"}
+          </button>
+        </div>
+        {err && <p className="text-[11px]" style={{ color: "#fca5a5" }}>{err}</p>}
+
+        {show && full != null && (
+          <pre
+            className="text-xs leading-relaxed text-foreground/85 whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-background/40 p-4 max-h-[420px] overflow-y-auto"
+          >
+            {full}
+          </pre>
+        )}
+
+        {!show && note.excerpt && (
           <p
             className="text-sm leading-relaxed text-foreground/85 border-l-2 pl-4"
             style={{ borderColor: colorOf(note.type) }}

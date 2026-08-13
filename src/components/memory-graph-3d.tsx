@@ -313,12 +313,21 @@ export function MemoryGraph3D({
   onSelect,
   embedded = false,
   sourceFilter = "all",
+  focusQuery = "",
+  focusNonce = 0,
 }: {
   onSelect: (node: MemNode) => void;
   embedded?: boolean;
   sourceFilter?: string;
+  /** Voice/text "pull up my X" flies the camera to the matching cluster and
+   *  makes those nodes glow. focusNonce bumps to re-trigger the same query. */
+  focusQuery?: string;
+  focusNonce?: number;
 }) {
   const [view, setView] = useState<ViewMode>("structured");
+  const [focusedIds, setFocusedIds] = useState<Set<string>>(() => new Set());
+  const focusedRef = useRef<Set<string>>(focusedIds);
+  focusedRef.current = focusedIds;
 
   const graphLd = useLiveData();
 
@@ -415,10 +424,55 @@ export function MemoryGraph3D({
   }, [data]);
 
   const isLit = (id: string) => {
+    // While a focus set is active, only the matching cluster is lit.
+    if (focusedIds.size > 0) return focusedIds.has(id);
     if (!hoverId) return true;
     if (id === hoverId) return true;
     return adjacency.get(hoverId)?.has(id) ?? false;
   };
+
+  // Voice/text focus: match nodes by name against the query, fly the camera to
+  // their centroid, glow them, pause the orbit — then release after a beat.
+  useEffect(() => {
+    const fq = focusQuery.trim().toLowerCase();
+    if (!fq || focusNonce <= 0 || !fgRef.current) return;
+    const fg = fgRef.current;
+    // "a | b | c" lights every alternative at once — the conversational console
+    // sends the full set of sources an answer drew from as one focus.
+    const terms = fq.split("|").map((s) => s.trim()).filter(Boolean);
+    const matches = (data.nodes as any[]).filter((n) => {
+      const hay = `${n.name ?? ""} ${n.id ?? ""} ${(n.tags ?? []).join(" ")}`.toLowerCase();
+      return terms.some((t) => hay.includes(t));
+    });
+    if (matches.length === 0) return;
+    const ids = new Set<string>(matches.map((n) => String(n.id)));
+    setFocusedIds(ids);
+    // Centroid of the matched nodes (positions exist once the layout settled).
+    const positioned = matches.filter((n) => typeof n.x === "number");
+    const cx = positioned.reduce((a, n) => a + n.x, 0) / (positioned.length || 1);
+    const cy = positioned.reduce((a, n) => a + n.y, 0) / (positioned.length || 1);
+    const cz = positioned.reduce((a, n) => a + n.z, 0) / (positioned.length || 1);
+    setRotating(false);
+    if (positioned.length) {
+      const dist = 180;
+      try {
+        fg.cameraPosition(
+          { x: cx + dist * 0.4, y: cy + dist * 0.3, z: cz + dist },
+          { x: cx, y: cy, z: cz },
+          1400,
+        );
+      } catch { /* fg not ready */ }
+    }
+    try { fg.refresh?.(); } catch { /* restyle glow */ }
+    // Hold the focus glow ~7s, then release back to the full graph + orbit.
+    const release = window.setTimeout(() => {
+      setFocusedIds(new Set());
+      setRotating(true);
+      try { fgRef.current?.refresh?.(); } catch { /* */ }
+    }, 7000);
+    return () => window.clearTimeout(release);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce, focusQuery]);
 
   useEffect(() => {
     if (!wrapRef.current) return;
@@ -626,6 +680,7 @@ export function MemoryGraph3D({
             nodeThreeObject={(n: any) => {
               const group = new THREE.Group();
               const lit = isLit(n.id);
+              const focused = focusedRef.current.size > 0 && focusedRef.current.has(n.id);
               const opacity = lit ? 1 : 0.18;
 
               let r = 6;
@@ -656,7 +711,9 @@ export function MemoryGraph3D({
               const mat = new THREE.MeshStandardMaterial({
                 color: n.color,
                 emissive: n.color,
-                emissiveIntensity: baseEmissive,
+                // Focus-matched nodes flare brighter so the recalled cluster
+                // reads as "lit up" the moment the camera arrives.
+                emissiveIntensity: focused ? baseEmissive + 2.2 : baseEmissive,
                 roughness: 0.35,
                 metalness: 0.1,
                 transparent: true,
@@ -754,7 +811,7 @@ export function MemoryGraph3D({
 
       {/* Controls — sit BELOW the canvas */}
       {!embedded && (
-        <div className="mt-3 rounded-xl border border-border/60 bg-card/60 backdrop-blur p-3 text-[11px] text-muted-foreground">
+        <div className="mt-3 rounded-xl border border-border bg-card shadow-sm p-3 text-[11px] text-muted-foreground">
           {/* Stack until xl — between lg and xl the fixed-width buttons+stats
               used to squeeze the flex-1 thumbnail selector into unreadable
               slivers with overlapping captions. */}
@@ -784,8 +841,8 @@ export function MemoryGraph3D({
                       title={v.hint}
                       className={`group relative rounded-lg border p-1.5 transition-all ${
                         active
-                          ? "border-foreground/50 bg-foreground/[0.06]"
-                          : "border-border/60 hover:border-foreground/30 hover:bg-foreground/[0.03]"
+                          ? "border-foreground/50 bg-foreground/[0.06] text-foreground"
+                          : "border-border/60 text-muted-foreground/70 hover:border-foreground/30 hover:bg-foreground/[0.03] hover:text-muted-foreground"
                       }`}
                     >
                       <ViewThumb kind={v.key} active={active} />
@@ -882,7 +939,9 @@ export function MemoryGraph3D({
 }
 
 function ViewThumb({ kind, active }: { kind: ViewMode; active: boolean }) {
-  const accent = active ? ACCENT : "rgba(180,190,210,0.55)";
+  // Inactive thumbs inherit the button's text color so they stay visible in
+  // BOTH themes — the old hardcoded pale gray vanished on the light card.
+  const accent = active ? ACCENT : "currentColor";
   const glow = active ? `drop-shadow(0 0 4px ${ACCENT})` : "none";
   if (kind === "structured") {
     return (

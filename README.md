@@ -424,6 +424,11 @@ claude-os/
 │                                     · /__hermes_sessions · /__hermes_skills
 │                                     · /__hermes_chat (SSE) ·
 │                                     /__hermes_image_upload · /__hermes_memory
+│                                     · /__claude_chat (SSE) · /__claude_attach
+│                                     (SSE re-join) · /__claude_abort ·
+│                                     /__sessions_live · /__mcp_approvals
+│                                     (MCP permission-prompt server) ·
+│                                     /__permission_decision
 └── package.json
 ```
 

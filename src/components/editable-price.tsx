@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Pencil } from "lucide-react";
+import { useCurrency } from "@/lib/currency";
 
 /**
  * An inline-editable price display. Shows "$200 / month" by default;
@@ -14,6 +15,9 @@ export function EditablePrice({
   onChange: (newPrice: number) => void;
   accent?: string;
 }) {
+  // Read-mode shows the display currency; editing stays in USD because that's
+  // what the providers bill and what we store.
+  const { format: fmtMoney } = useCurrency();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value ?? ""));
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,7 +57,7 @@ export function EditablePrice({
           className="w-16 bg-transparent border-b border-foreground/30 text-base font-semibold tabular-nums outline-none text-foreground"
           style={{ caretColor: accent }}
         />
-        <span className="text-[10px] text-muted-foreground tabular-nums">/ month</span>
+        <span className="text-[10px] text-muted-foreground tabular-nums">USD / month</span>
       </span>
     );
   }
@@ -61,7 +65,7 @@ export function EditablePrice({
   return (
     <span className="inline-flex items-baseline gap-1 group/price cursor-pointer" onClick={() => setEditing(true)}>
       <span className="text-base font-semibold tabular-nums">
-        {value !== null ? `$${value}` : "—"}
+        {value !== null ? fmtMoney(value) : "—"}
       </span>
       <span className="text-[10px] text-muted-foreground tabular-nums">
         {value !== null ? "/ month" : "credit"}

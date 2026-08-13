@@ -2,6 +2,266 @@
 @source "../src";
 @import "tw-animate-css";
 
+@keyframes design-spectrum-drift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.design-spectrum-frame {
+  animation: design-spectrum-drift 16s ease-in-out infinite;
+}
+
+/* ── Design: the render tile ───────────────────────────────────────────────
+ *
+ * While a generation runs this tile is the only thing on screen, so it has
+ * to be worth looking at for the forty-odd seconds it's up. Five soft lobes
+ * of colour drift on their own long cycles (17s/19s/23s/29s/31s — no common
+ * multiple inside a real wait, so the field never visibly repeats), blend
+ * additively into each other, and breathe as a group. Light travelling the
+ * rim reads as the surface being alive rather than a control that spins.
+ *
+ * Everything animated is transform or opacity. Blur radii, gradient stops
+ * and layer sizes are fixed, which keeps each lobe on its own composited
+ * layer instead of repainting the tile every frame — this runs on a machine
+ * that has already fallen over once on memory, and several of these tiles
+ * can be on screen at the same time.
+ */
+
+@keyframes design-lobe-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(58%, 34%, 0) scale(1.22);
+  }
+  66% {
+    transform: translate3d(-22%, 52%, 0) scale(0.86);
+  }
+}
+
+@keyframes design-lobe-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  40% {
+    transform: translate3d(-62%, 44%, 0) scale(0.82);
+  }
+  70% {
+    transform: translate3d(30%, -30%, 0) scale(1.28);
+  }
+}
+
+@keyframes design-lobe-c {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(0.94);
+  }
+  45% {
+    transform: translate3d(48%, -54%, 0) scale(1.3);
+  }
+  75% {
+    transform: translate3d(-30%, -16%, 0) scale(1);
+  }
+}
+
+@keyframes design-lobe-d {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.1);
+  }
+  38% {
+    transform: translate3d(-40%, -50%, 0) scale(0.84);
+  }
+  72% {
+    transform: translate3d(-64%, 26%, 0) scale(1.2);
+  }
+}
+
+@keyframes design-lobe-e {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(0.86);
+  }
+  50% {
+    transform: translate3d(66%, 40%, 0) scale(1.35);
+  }
+}
+
+/* The whole field inhales and exhales, so the lobes never settle into a
+   readable orbit — it's the difference between weather and a carousel. */
+@keyframes design-field-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.86;
+  }
+  50% {
+    transform: scale(1.07);
+    opacity: 1;
+  }
+}
+
+/* A brighter concentration wandering through the field on a figure-eight —
+   the eye needs one thing to follow or the whole tile reads as wallpaper.
+   Heavily blurred on purpose: a legible dot would read as a loading orb. */
+@keyframes design-render-gleam {
+  0%,
+  100% {
+    transform: translate3d(-34%, -18%, 0) scale(0.9);
+    opacity: 0.24;
+  }
+  25% {
+    transform: translate3d(28%, 22%, 0) scale(1.15);
+    opacity: 0.38;
+  }
+  50% {
+    transform: translate3d(36%, -24%, 0) scale(0.95);
+    opacity: 0.2;
+  }
+  75% {
+    transform: translate3d(-26%, 26%, 0) scale(1.1);
+    opacity: 0.34;
+  }
+}
+
+.design-render-gleam {
+  animation: design-render-gleam 13s cubic-bezier(0.45, 0, 0.35, 1) infinite;
+  will-change: transform;
+}
+
+/* Light crossing the glass. Long pause between passes: it should feel like
+   something you caught, not a repeating sweep. */
+@keyframes design-render-sheen {
+  0%,
+  62%,
+  100% {
+    transform: translate3d(-140%, 0, 0) rotate(14deg);
+    opacity: 0;
+  }
+  70% {
+    opacity: 0.5;
+  }
+  92% {
+    transform: translate3d(140%, 0, 0) rotate(14deg);
+    opacity: 0;
+  }
+}
+
+.design-render-field {
+  animation: design-field-breathe 9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.design-render-lobe {
+  animation-duration: 23s;
+  animation-timing-function: cubic-bezier(0.45, 0, 0.35, 1);
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.design-render-lobe-a {
+  animation-name: design-lobe-a;
+  animation-duration: 17s;
+}
+.design-render-lobe-b {
+  animation-name: design-lobe-b;
+  animation-duration: 19s;
+}
+.design-render-lobe-c {
+  animation-name: design-lobe-c;
+  animation-duration: 23s;
+}
+.design-render-lobe-d {
+  animation-name: design-lobe-d;
+  animation-duration: 29s;
+}
+.design-render-lobe-e {
+  animation-name: design-lobe-e;
+  animation-duration: 31s;
+}
+
+.design-render-sheen {
+  animation: design-render-sheen 11s cubic-bezier(0.32, 0, 0.2, 1) infinite;
+}
+
+/* Registered so the angle can be interpolated. Where @property isn't
+   supported the rim simply holds still, which still looks like a rim. */
+@property --design-rim-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes design-rim-turn {
+  to {
+    --design-rim-angle: 360deg;
+  }
+}
+
+/* The rim's own bloom, thrown inwards. A hard 1px edge alone looks printed
+   on; the bloom is what makes the border read as light escaping the tile. */
+.design-render-bloom {
+  background: conic-gradient(
+    from var(--design-rim-angle),
+    rgba(255, 95, 61, 0.85),
+    rgba(255, 182, 61, 0.7),
+    rgba(18, 215, 164, 0.85),
+    rgba(47, 155, 255, 0.9),
+    rgba(125, 85, 255, 0.75),
+    rgba(219, 112, 200, 0.8),
+    rgba(255, 95, 61, 0.85)
+  );
+  filter: blur(11px);
+  -webkit-mask: radial-gradient(120% 120% at 50% 50%, transparent 46%, #000 88%);
+  mask: radial-gradient(120% 120% at 50% 50%, transparent 46%, #000 88%);
+  animation: design-rim-turn 14s linear infinite;
+}
+
+.design-render-rim {
+  background: conic-gradient(
+    from var(--design-rim-angle),
+    rgba(255, 118, 92, 0.7),
+    rgba(229, 201, 102, 0.55),
+    rgba(86, 218, 186, 0.7),
+    rgba(93, 180, 255, 0.75),
+    rgba(147, 120, 255, 0.6),
+    rgba(219, 112, 200, 0.65),
+    rgba(255, 118, 92, 0.7)
+  );
+  /* Paint the ring only: the padding box minus the content box. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: design-rim-turn 14s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .design-spectrum-frame,
+  .design-render-field,
+  .design-render-lobe,
+  .design-render-gleam,
+  .design-render-sheen,
+  .design-render-bloom,
+  .design-render-rim {
+    animation: none;
+  }
+  /* Frozen mid-pass the sheen would sit as a bright bar across the tile. */
+  .design-render-sheen {
+    opacity: 0;
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /*
@@ -109,7 +369,7 @@
   --secondary: oklch(0.235 0.015 260);
   --secondary-foreground: oklch(0.96 0.003 247);
   --muted: oklch(0.225 0.013 260);
-  --muted-foreground: oklch(0.65 0.02 256);
+  --muted-foreground: oklch(0.79 0.02 256);
   --accent: oklch(0.255 0.018 260);
   --accent-foreground: oklch(0.98 0.003 247);
   --destructive: oklch(0.704 0.191 22.216);
@@ -424,8 +684,12 @@ button.focus-orange:focus {
  * inline (so the seam is invisible) and slid -50% over the configured
  * duration. Pure CSS so it survives SSR + works without JS. */
 @keyframes hermes-marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }
 
 /* SVG filter for chromatic-aberration on Pantheon images. Applied via
@@ -438,10 +702,10 @@ button.focus-orange:focus {
 }
 
 .hermes-skin {
-  --hermes-bg: #071D1C;
-  --hermes-cream: #FFE6CB;
-  --hermes-cream-dim: rgba(255, 230, 203, 0.6);
-  --hermes-cream-muted: rgba(255, 230, 203, 0.4);
+  --hermes-bg: #071d1c;
+  --hermes-cream: #ffe6cb;
+  --hermes-cream-dim: rgba(255, 230, 203, 0.75);
+  --hermes-cream-muted: rgba(255, 230, 203, 0.62);
   --hermes-cream-soft: rgba(255, 230, 203, 0.12);
   --hermes-cream-border: rgba(255, 230, 203, 0.2);
   font-family: "Fraunces", ui-serif, Georgia, serif;
@@ -465,19 +729,30 @@ button.focus-orange:focus {
   position: relative;
   z-index: 1;
 }
-.hermes-skin .hermes-mono,
-.hermes-skin code,
-.hermes-skin pre,
-.hermes-skin kbd {
-  font-family: "Courier Prime", "Courier New", ui-monospace, monospace;
-  letter-spacing: 0;
+/* In @layer base so Tailwind's `tracking-*` utilities can still win.
+   Unlayered, this rule beat every layered utility regardless of specificity —
+   `tracking-wider` / `tracking-[0.16em]` were silently dead on ~30 elements,
+   including the whole bottom telemetry strip. ALL-CAPS Courier Prime at a small
+   size with zero tracking is the least legible setting available, which is a
+   large part of why that row was hard to read. */
+@layer base {
+  .hermes-skin .hermes-mono,
+  .hermes-skin code,
+  .hermes-skin pre,
+  .hermes-skin kbd {
+    font-family: "Courier Prime", "Courier New", ui-monospace, monospace;
+    letter-spacing: 0;
+  }
 }
 .hermes-skin .hermes-display {
   font-family: "Fraunces", ui-serif, Georgia, serif;
   /* Heavier weight + slight optical-size tweak gives Fraunces a Mondwest-
      adjacent display feel — strong verticals, high contrast. */
   font-weight: 600;
-  font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 1;
+  font-variation-settings:
+    "opsz" 144,
+    "SOFT" 0,
+    "WONK" 1;
   letter-spacing: -0.005em;
   line-height: 1;
 }
@@ -493,66 +768,148 @@ button.focus-orange:focus {
    Living aurora + drifting constellation behind the KG title. Pure CSS,
    GPU-friendly transforms only, respects reduced-motion. */
 @keyframes kg-drift-a {
-  0%   { transform: translate3d(0, 0, 0) scale(1.05); }
-  50%  { transform: translate3d(3%, -4%, 0) scale(1.12); }
-  100% { transform: translate3d(0, 0, 0) scale(1.05); }
+  0% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(3%, -4%, 0) scale(1.12);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
 }
 @keyframes kg-drift-b {
-  0%   { transform: translate3d(0, 0, 0) scale(1.1); }
-  50%  { transform: translate3d(-4%, 3%, 0) scale(1.04); }
-  100% { transform: translate3d(0, 0, 0) scale(1.1); }
+  0% {
+    transform: translate3d(0, 0, 0) scale(1.1);
+  }
+  50% {
+    transform: translate3d(-4%, 3%, 0) scale(1.04);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.1);
+  }
 }
 @keyframes kg-stars-drift {
-  0%   { transform: translate3d(0, 0, 0); opacity: 0.7; }
-  50%  { transform: translate3d(-2%, 1%, 0); opacity: 1; }
-  100% { transform: translate3d(0, 0, 0); opacity: 0.7; }
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translate3d(-2%, 1%, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.7;
+  }
 }
-.kg-aurora-a { animation: kg-drift-a 18s ease-in-out infinite; filter: blur(8px); will-change: transform; }
-.kg-aurora-b { animation: kg-drift-b 24s ease-in-out infinite; filter: blur(12px); will-change: transform; }
-.kg-stars    { animation: kg-stars-drift 30s ease-in-out infinite; will-change: transform, opacity; }
+.kg-aurora-a {
+  animation: kg-drift-a 18s ease-in-out infinite;
+  filter: blur(8px);
+  will-change: transform;
+}
+.kg-aurora-b {
+  animation: kg-drift-b 24s ease-in-out infinite;
+  filter: blur(12px);
+  will-change: transform;
+}
+.kg-stars {
+  animation: kg-stars-drift 30s ease-in-out infinite;
+  will-change: transform, opacity;
+}
 @media (prefers-reduced-motion: reduce) {
-  .kg-aurora-a, .kg-aurora-b, .kg-stars { animation: none; }
+  .kg-aurora-a,
+  .kg-aurora-b,
+  .kg-stars {
+    animation: none;
+  }
 }
 
 /* ── KG header: statue ken-burns + constellation node twinkle ───────── */
 @keyframes kg-statue-zoom {
-  0%   { transform: scale(1.0) translateX(0); }
-  50%  { transform: scale(1.06) translateX(-1.5%); }
-  100% { transform: scale(1.0) translateX(0); }
+  0% {
+    transform: scale(1) translateX(0);
+  }
+  50% {
+    transform: scale(1.06) translateX(-1.5%);
+  }
+  100% {
+    transform: scale(1) translateX(0);
+  }
 }
-.kg-statue-zoom { animation: kg-statue-zoom 26s ease-in-out infinite; will-change: transform; }
+.kg-statue-zoom {
+  animation: kg-statue-zoom 26s ease-in-out infinite;
+  will-change: transform;
+}
 
 /* whole constellation drifts gently */
 @keyframes kg-constellation-drift {
-  0%   { transform: translate3d(0,0,0); }
-  50%  { transform: translate3d(-1.2%, 0.8%, 0); }
-  100% { transform: translate3d(0,0,0); }
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(-1.2%, 0.8%, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
 }
-.kg-constellation { animation: kg-constellation-drift 28s ease-in-out infinite; will-change: transform; }
+.kg-constellation {
+  animation: kg-constellation-drift 28s ease-in-out infinite;
+  will-change: transform;
+}
 
 /* nodes twinkle on staggered cycles */
 @keyframes kg-twinkle {
-  0%, 100% { opacity: 0.45; }
-  50%      { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
 }
-.kg-node-0 { animation: kg-twinkle 3.2s ease-in-out infinite; }
-.kg-node-1 { animation: kg-twinkle 4.1s ease-in-out infinite 0.6s; }
-.kg-node-2 { animation: kg-twinkle 5.0s ease-in-out infinite 1.2s; }
+.kg-node-0 {
+  animation: kg-twinkle 3.2s ease-in-out infinite;
+}
+.kg-node-1 {
+  animation: kg-twinkle 4.1s ease-in-out infinite 0.6s;
+}
+.kg-node-2 {
+  animation: kg-twinkle 5s ease-in-out infinite 1.2s;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .kg-statue-zoom, .kg-constellation, .kg-node-0, .kg-node-1, .kg-node-2, .ministry-aurora, .ministry-connector { animation: none; }
+  .kg-statue-zoom,
+  .kg-constellation,
+  .kg-node-0,
+  .kg-node-1,
+  .kg-node-2,
+  .ministry-aurora,
+  .ministry-connector {
+    animation: none;
+  }
 }
 
 /* Ministry of Experts — a slow gold aurora drifting behind the council chart. */
 @keyframes ministry-aurora {
-  0%   { transform: translate(-6%, -5%) scale(1);   opacity: 0.55; }
-  50%  { transform: translate(6%, 5%) scale(1.18);  opacity: 0.85; }
-  100% { transform: translate(-6%, -5%) scale(1);   opacity: 0.55; }
+  0% {
+    transform: translate(-6%, -5%) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate(6%, 5%) scale(1.18);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(-6%, -5%) scale(1);
+    opacity: 0.55;
+  }
 }
 .ministry-aurora {
   background:
-    radial-gradient(42% 52% at 32% 34%, rgba(255,210,30,0.20), transparent 70%),
-    radial-gradient(38% 46% at 70% 64%, rgba(255,170,40,0.13), transparent 72%);
+    radial-gradient(42% 52% at 32% 34%, rgba(255, 210, 30, 0.2), transparent 70%),
+    radial-gradient(38% 46% at 70% 64%, rgba(255, 170, 40, 0.13), transparent 72%);
   filter: blur(16px);
   animation: ministry-aurora 9s ease-in-out infinite;
   will-change: transform, opacity;
@@ -560,9 +917,95 @@ button.focus-orange:focus {
 
 /* Flowing energy along the council connectors (experts → core). */
 @keyframes ministry-flow {
-  to { stroke-dashoffset: -16; }
+  to {
+    stroke-dashoffset: -16;
+  }
 }
 .ministry-connector {
   stroke-dasharray: 3 5;
   animation: ministry-flow 0.85s linear infinite;
+}
+
+/* home chat "thinking" equalizer — bars breathe in the agent's tone */
+.hc-eq {
+  display: inline-flex;
+  gap: 2.5px;
+  align-items: flex-end;
+  height: 13px;
+}
+.hc-eq span {
+  width: 2.5px;
+  height: 4px;
+  border-radius: 1px;
+  background: currentColor;
+  animation: hc-eq 0.9s ease-in-out infinite;
+}
+@keyframes hc-eq {
+  0%,
+  100% {
+    height: 4px;
+    opacity: 0.45;
+  }
+  50% {
+    height: 13px;
+    opacity: 1;
+  }
+}
+
+/* harness bar — pulsing dot + sliding shimmer while a turn runs */
+.hc-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: hc-pulse 1.2s ease-in-out infinite;
+}
+@keyframes hc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.78);
+  }
+}
+.hc-track {
+  height: 2px;
+  border-radius: 1px;
+  overflow: hidden;
+  background: rgba(255, 230, 203, 0.1);
+}
+.hc-slide {
+  height: 100%;
+  width: 30%;
+  border-radius: 1px;
+  opacity: 0.85;
+  animation: hc-slide 2.2s ease-in-out infinite;
+}
+@keyframes hc-slide {
+  0% {
+    margin-left: -30%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
+/* Chat code/diff panels — the copy button stays out of the way until you
+   reach for it, but never hides from the keyboard. */
+.md-copy-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.md-panel:hover .md-copy-btn,
+.md-panel:focus-within .md-copy-btn {
+  opacity: 1;
+}
+@media (hover: none) {
+  /* Touch has no hover — always show it there. */
+  .md-copy-btn {
+    opacity: 1;
+  }
 }

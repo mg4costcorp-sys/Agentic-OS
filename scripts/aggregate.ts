@@ -13,6 +13,7 @@ import {
   appSupportDir,
   venvBin,
 } from "./platform";
+import { recordSnapshot } from "./history";
 
 const HOME = homedir();
 const CLAUDE_DIR = join(HOME, ".claude");
@@ -467,8 +468,21 @@ function readClaudeCredential(): ClaudeCredential | null {
       const parsed = JSON.parse(raw);
       const inner = parsed?.claudeAiOauth ?? parsed;
       if (typeof inner?.accessToken === "string" && inner.accessToken.startsWith("sk-ant-oat01-")) {
-        if (DEBUG) console.log("[cred] returning from file path");
-        return inner as ClaudeCredential;
+        // An EXPIRED file credential must not shadow a live Keychain one.
+        // This is the whole bug behind "plan usage is wrong": the file here
+        // expired on 2026-06-04, the Keychain credential was valid, and this
+        // function returned the file every time because it looked first and
+        // only checked that the token PARSED — never that it still worked.
+        // Every usage call 401'd for 51 days, the failure was swallowed, and
+        // the dashboard quietly showed a local-log guess instead. A stale
+        // credential is worse than no credential: it fails authoritatively.
+        const exp = Number((inner as any).expiresAt) || 0;
+        if (exp && Date.now() > exp - 60_000) {
+          if (DEBUG) console.log("[cred] file credential expired — falling through to keychain");
+        } else {
+          if (DEBUG) console.log("[cred] returning from file path");
+          return inner as ClaudeCredential;
+        }
       }
     }
   } catch (e: any) {
@@ -3464,14 +3478,86 @@ async function main() {
     "ChatGPT Enterprise": 200,
   };
   const chatgptPlanName = (chatgpt as any).planName ?? "ChatGPT Plus";
+  // Real ChatGPT/Codex usage — OpenAI stamps its own rate-limit state
+  // (used_percent + window + reset) into every Codex session log. Read the
+  // freshest snapshot so the gauge shows ACTUAL usage instead of a placeholder
+  // 0. Two windows, like Claude: primary (5h) + secondary (weekly). Fully
+  // local, keyless, portable to any Codex install.
+  const codexLimits = (():
+    | {
+        primary?: { usedPercent: number; windowMinutes: number; resetsAt: number };
+        secondary?: { usedPercent: number; windowMinutes: number; resetsAt: number };
+        capturedAt: number;
+      }
+    | null => {
+    try {
+      const files: { path: string; mtime: number }[] = [];
+      const walk = (dir: string, depth = 0) => {
+        if (depth > 6 || !existsSync(dir)) return;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const p = join(dir, entry.name);
+          if (entry.isDirectory()) walk(p, depth + 1);
+          else if (entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) {
+            try { files.push({ path: p, mtime: statSync(p).mtimeMs }); } catch { /* skip */ }
+          }
+        }
+      };
+      walk(join(CODEX_DIR, "sessions"));
+      walk(join(CODEX_DIR, "archived_sessions"));
+      if (files.length === 0) return null;
+      files.sort((a, b) => b.mtime - a.mtime);
+      const lastMatch = (re: RegExp, text: string): RegExpExecArray | null => {
+        const g = new RegExp(re.source, "g");
+        let m: RegExpExecArray | null;
+        let last: RegExpExecArray | null = null;
+        while ((m = g.exec(text))) last = m;
+        return last;
+      };
+      const primaryRe = /"primary":\{"used_percent":([0-9.]+),"window_minutes":([0-9]+),"resets_at":([0-9]+)/;
+      const secondaryRe = /"secondary":\{"used_percent":([0-9.]+),"window_minutes":([0-9]+),"resets_at":([0-9]+)/;
+      // The very newest session may be tool-only (no model turn → no rate-limit
+      // header), so scan the recent handful until one carries the snapshot.
+      for (const f of files.slice(0, 15)) {
+        let text = "";
+        try { text = readFileSync(f.path, "utf-8"); } catch { continue; }
+        if (!text.includes("rate_limits")) continue;
+        const p = lastMatch(primaryRe, text);
+        const s = lastMatch(secondaryRe, text);
+        if (!p && !s) continue;
+        return {
+          ...(p ? { primary: { usedPercent: Number(p[1]), windowMinutes: Number(p[2]), resetsAt: Number(p[3]) } } : {}),
+          ...(s ? { secondary: { usedPercent: Number(s[1]), windowMinutes: Number(s[2]), resetsAt: Number(s[3]) } } : {}),
+          capturedAt: Math.round(f.mtime),
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })();
   const chatgptWindow = chatgpt.present
     ? {
         plan: chatgptPlanName,
         authMode: chatgpt.mode,
         messagesUsed: 0,
         messageCap: chatgptCaps[chatgptPlanName] ?? 80,
-        pctUsed: 0,
-        note: "ChatGPT message counts not parsed in v1 — Codex archives parse pending",
+        pctUsed: codexLimits?.primary?.usedPercent ?? codexLimits?.secondary?.usedPercent ?? 0,
+        // Real rate-limit windows (OpenAI headers cached in Codex logs); null
+        // when there are no Codex sessions on disk to read usage from yet.
+        windows: codexLimits
+          ? [
+              ...(codexLimits.primary
+                ? [{ label: "5h", pct: codexLimits.primary.usedPercent, resetsAt: codexLimits.primary.resetsAt }]
+                : []),
+              ...(codexLimits.secondary
+                ? [{ label: "Weekly", pct: codexLimits.secondary.usedPercent, resetsAt: codexLimits.secondary.resetsAt }]
+                : []),
+            ]
+          : null,
+        capturedAt: codexLimits?.capturedAt ?? null,
+        note: codexLimits
+          ? "Live rate-limit % from OpenAI's own headers (read from Codex session logs)."
+          : "No Codex sessions on disk yet — usage will populate after your next Codex run.",
         hasApiKey: chatgpt.hasApiKey,
         hasOauth: chatgpt.hasOauth,
       }
@@ -3998,6 +4084,10 @@ async function main() {
   };
 
   const emitted = sanitizeForEmission(data);
+  // Persist today's snapshot to ~/.claude-os/history.jsonl and embed the recent
+  // window so the dashboard can chart trends without filesystem access. Never
+  // throws — a history hiccup must not block the live-data.json write.
+  emitted.history = recordSnapshot(emitted);
   await Bun.write(OUT, JSON.stringify(emitted, null, 2));
   console.log(`[aggregate] wrote ${OUT}`);
   console.log(

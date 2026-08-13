@@ -18,6 +18,7 @@ import {
   RotateCw,
   Search,
   Trophy,
+  Workflow,
   X,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ import {
   formatPrice,
   formatSpeed,
   formatTier,
+  resolveRecipe,
   rosterSubset,
   sortModels,
   useModelIntel,
@@ -37,6 +39,7 @@ import {
   type ModelIntelDoc,
   type ModelSortKey,
   type ModelStatus,
+  type OrchestrationPlan,
   type SentimentLabel,
   type Tier,
 } from "@/lib/model-intel";
@@ -411,6 +414,24 @@ export function ModelIntelligence(): React.JSX.Element {
 
   const [expanded, setExpanded] = useState(true); // SCAN table — default OPEN so the full leaderboard shows
   const [expandedId, setExpandedId] = useState<string | null>(null); // INSPECT drawer; one at a time
+  // Leaderboard ⇄ Playbooks sub-view. Initialized to "leaderboard" and hydrated from localStorage
+  // in an effect (not the initializer) so SSR markup matches the first client render.
+  const [view, setView] = useState<"leaderboard" | "playbooks">("leaderboard");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(VIEW_LS_KEY) === "playbooks") setView("playbooks");
+    } catch {
+      /* private mode etc — keep default */
+    }
+  }, []);
+  const switchView = useCallback((v: "leaderboard" | "playbooks") => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_LS_KEY, v);
+    } catch {
+      /* non-fatal */
+    }
+  }, []);
   const [sort, setSort] = useState<SortState | null>(null); // ephemeral; null = default order
   const [vendorFilter, setVendor] = useState<string | null>(null); // logo-strip-as-filter
   const [tierFilter, setTier] = useState<Tier | "all">("all");
@@ -458,12 +479,14 @@ export function ModelIntelligence(): React.JSX.Element {
     // and "claude-opus-4.8" all land the same model.
     const q = query.trim().toLowerCase();
     if (q) {
+      // openrouterId is legitimately null for models that aren't on
+      // OpenRouter at all (e.g. Muse Spark), so it can't be dereferenced
+      // directly — an unguarded .toLowerCase() here took the whole
+      // dashboard down with "Cannot read properties of null" the moment
+      // anyone typed in the search box. Coerce every field before matching.
+      const hit = (v: string | null | undefined) => (v ?? "").toLowerCase().includes(q);
       list = list.filter(
-        (m) =>
-          m.name.toLowerCase().includes(q) ||
-          m.vendor.toLowerCase().includes(q) ||
-          m.id.toLowerCase().includes(q) ||
-          m.openrouterId.toLowerCase().includes(q),
+        (m) => hit(m.name) || hit(m.vendor) || hit(m.id) || hit(m.openrouterId),
       );
     }
 
@@ -505,6 +528,18 @@ export function ModelIntelligence(): React.JSX.Element {
 
   const expandedModel = expandedId ? (byId[expandedId] ?? null) : null;
 
+  // Which orchestration recipes the inspected model appears in ("Frontier plan… — verifier").
+  const orchestratesAs = useMemo(() => {
+    if (!expandedId || !data.orchestration) return [];
+    const out: string[] = [];
+    for (const r of data.orchestration.recipes) {
+      for (const role of r.roles) {
+        if (role.candidates.includes(expandedId)) out.push(`${r.label} — ${role.id}`);
+      }
+    }
+    return out;
+  }, [expandedId, data]);
+
   return (
     <div className="relative">
       {/* The Refresh control lives in the panel (the SectionHead host shows the switcher only); we
@@ -525,44 +560,58 @@ export function ModelIntelligence(): React.JSX.Element {
         }}
       />
 
-      <LogoStrip
-        models={data.models}
-        inRoster={inRoster}
-        activeVendor={vendorFilter}
-        onPick={(v) => setVendor((cur) => (cur === v ? null : v))}
-      />
+      <ViewSwitch view={view} onChange={switchView} hasPlaybooks={!!data.orchestration} />
 
-      <ChampionsRow
-        models={data.models}
-        inRoster={inRoster}
-        onInspect={setExpandedId}
-        onRankBy={onRankBy}
-      />
-
-      {expanded && (
-        <ModelTable
-          rows={rows}
-          query={query}
-          onQuery={setQuery}
-          sort={sort}
-          onSort={onSort}
-          onRankBy={onRankBy}
-          tierFilter={tierFilter}
-          onTier={setTier}
-          showOffRoster={showOffRoster}
-          onToggleOffRoster={() => setShowOffRoster((v) => !v)}
-          roster={{ toggle, inRoster }}
-          rosterCount={roster.length}
-          onClearRoster={clear}
+      {view === "playbooks" ? (
+        <PlaybooksPanel
+          doc={data}
+          rosterIds={roster}
           onInspect={setExpandedId}
-          leaderboards={data.leaderboards}
+          onCopied={() => toast("Copied ✓")}
         />
+      ) : (
+        <>
+          <LogoStrip
+            models={data.models}
+            inRoster={inRoster}
+            activeVendor={vendorFilter}
+            onPick={(v) => setVendor((cur) => (cur === v ? null : v))}
+          />
+
+          <ChampionsRow
+            models={data.models}
+            inRoster={inRoster}
+            onInspect={setExpandedId}
+            onRankBy={onRankBy}
+          />
+
+          {expanded && (
+            <ModelTable
+              rows={rows}
+              query={query}
+              onQuery={setQuery}
+              sort={sort}
+              onSort={onSort}
+              onRankBy={onRankBy}
+              tierFilter={tierFilter}
+              onTier={setTier}
+              showOffRoster={showOffRoster}
+              onToggleOffRoster={() => setShowOffRoster((v) => !v)}
+              roster={{ toggle, inRoster }}
+              rosterCount={roster.length}
+              onClearRoster={clear}
+              onInspect={setExpandedId}
+              leaderboards={data.leaderboards}
+            />
+          )}
+        </>
       )}
 
       {expandedModel && (
         <InspectDrawer
           model={expandedModel}
           curatedAsOf={data.freshness?.snapshot?.curatedAsOf ?? ""}
+          orchestratesAs={orchestratesAs}
           leaderboards={data.leaderboards}
           onClose={() => setExpandedId(null)}
           onCopyOne={() => {
@@ -813,6 +862,313 @@ function ChampionCard({
           <ArrowUpRight className="h-2.5 w-2.5" />
         </button>
       )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────────────
+//  Playbooks — the ORCHESTRATION layer. Typeset of model-intel.json's orchestration block:
+//  task-shape chips → recipe cards with roles resolved live against the user's roster.
+//  Pure render of resolveRecipe(); no model calls happen here.
+// ────────────────────────────────────────────────────────────────────────────────────────
+
+const VIEW_LS_KEY = "claude-os-model-intel-view";
+
+function ViewSwitch({
+  view,
+  onChange,
+  hasPlaybooks,
+}: {
+  view: "leaderboard" | "playbooks";
+  onChange: (v: "leaderboard" | "playbooks") => void;
+  hasPlaybooks: boolean;
+}) {
+  const opt = (key: "leaderboard" | "playbooks", label: string, icon: ReactNode) => {
+    const active = view === key;
+    return (
+      <button
+        type="button"
+        aria-pressed={active}
+        onClick={() => onChange(key)}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] transition-colors ${
+          active
+            ? "border-foreground/40 bg-foreground/10 text-foreground"
+            : "border-border/70 text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        {icon}
+        {label}
+      </button>
+    );
+  };
+  if (!hasPlaybooks) return null; // pre-orchestration snapshot → no switch, leaderboard only
+  return (
+    <div className="mb-4 flex items-center gap-1.5">
+      {opt("leaderboard", "Leaderboard", <Trophy className="h-3 w-3" />)}
+      {opt("playbooks", "Playbooks", <Workflow className="h-3 w-3" />)}
+    </div>
+  );
+}
+
+/** "high-risk-repo-work" → "High-risk repo work" */
+function humanizeRuleId(id: string): string {
+  const s = id.replace(/-/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function PlaybooksPanel({
+  doc,
+  rosterIds,
+  onInspect,
+  onCopied,
+}: {
+  doc: ModelIntelDoc;
+  rosterIds: string[];
+  onInspect: (id: string) => void;
+  onCopied: () => void;
+}) {
+  const orch = doc.orchestration;
+  const [activeRule, setActiveRule] = useState<string | null>(null);
+
+  const rules = useMemo(
+    () =>
+      orch
+        ? orch.taskShapeRules
+            .slice()
+            .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))
+        : [],
+    [orch],
+  );
+
+  const plans = useMemo(() => {
+    if (!orch) return [];
+    return orch.recipes
+      .map((r) => resolveRecipe(doc, r.id, rosterIds))
+      .filter((p): p is OrchestrationPlan => p != null);
+  }, [doc, orch, rosterIds]);
+
+  if (!orch) {
+    return (
+      <div className="rounded-xl border border-border/60 bg-black/20 p-4 text-[12px] text-muted-foreground">
+        This snapshot has no orchestration block yet — refresh model-intel.json.
+      </div>
+    );
+  }
+
+  const highlightedRecipeId = activeRule
+    ? (rules.find((r) => r.id === activeRule)?.recipeId ?? null)
+    : null;
+
+  return (
+    <div>
+      {/* Task-shape chips: pick the shape of the work → its recipe lights up. */}
+      <div className="mb-2 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">
+        <Workflow className="h-3 w-3 text-violet-400" />
+        Task shapes · what kind of work is it?
+      </div>
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {rules.map((rule) => {
+          const active = activeRule === rule.id;
+          return (
+            <button
+              key={rule.id}
+              type="button"
+              aria-pressed={active}
+              title={rule.signals.join(" · ")}
+              onClick={() => setActiveRule((cur) => (cur === rule.id ? null : rule.id))}
+              className={`rounded-full border px-2.5 py-1 text-[11px] transition-all ${
+                active
+                  ? "border-violet-400/70 bg-violet-500/20 text-violet-100 shadow-[0_0_16px_-6px_rgba(139,92,246,0.7)]"
+                  : "border-border/70 text-muted-foreground hover:-translate-y-px hover:border-foreground/40 hover:text-foreground"
+              }`}
+            >
+              {humanizeRuleId(rule.id)}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {plans.map((plan) => (
+          <RecipeCard
+            key={plan.recipe.id}
+            plan={plan}
+            isDefault={plan.recipe.id === orch.defaultRecipeId}
+            highlighted={highlightedRecipeId === plan.recipe.id}
+            dimmed={highlightedRecipeId != null && highlightedRecipeId !== plan.recipe.id}
+            onInspect={onInspect}
+            onCopied={onCopied}
+          />
+        ))}
+      </div>
+
+      <div className="mt-3 text-[10px] text-muted-foreground/60">
+        Recipes resolve live against your roster — un-check a model in the leaderboard and every
+        role re-resolves to the next eligible candidate. Copy a plan and hand it to Claude Code,
+        Hermes or Codex.
+      </div>
+    </div>
+  );
+}
+
+const BUDGET_CHIP: Record<string, string> = {
+  low: "border border-emerald-300 bg-emerald-100 text-emerald-700",
+  medium: "border border-amber-300 bg-amber-100 text-amber-700",
+  high: "border border-red-300 bg-red-100 text-red-700",
+};
+
+function RecipeCard({
+  plan,
+  isDefault,
+  highlighted,
+  dimmed,
+  onInspect,
+  onCopied,
+}: {
+  plan: OrchestrationPlan;
+  isDefault: boolean;
+  highlighted: boolean;
+  dimmed: boolean;
+  onInspect: (id: string) => void;
+  onCopied: () => void;
+}) {
+  const { recipe, pattern, roles, complete } = plan;
+
+  // Glow tint = the recipe's "brain": the final role's resolved model (verifier/finisher/
+  // synthesizer/reducer). Same brand-glow idiom as ChampionCard so the two rows read as one system.
+  const lead = roles[roles.length - 1]?.models[0] ?? roles[0]?.models[0] ?? null;
+  const leadBrand = lead ? resolveVendor(lead.vendorKey, lead.vendor) : null;
+  const glow = highlighted ? "8b5cf6" : (leadBrand?.color ?? "8b5cf6");
+
+  const copyPlan = () => {
+    const payload = {
+      recipe: recipe.id,
+      pattern: pattern?.id ?? null,
+      controls: recipe.controls,
+      roles: roles.map((r) => ({
+        role: r.role.id,
+        models: r.models.map((m) => m.id),
+        effort: r.role.effort,
+        maxCalls: r.role.maxCalls,
+      })),
+      complete: plan.complete,
+      why: plan.why,
+    };
+    void copyText(JSON.stringify(payload, null, 2)).then((ok) => {
+      if (ok) onCopied();
+    });
+  };
+
+  return (
+    <div
+      className={`group relative overflow-hidden rounded-2xl border bg-white p-4 text-neutral-900 transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_30px_-15px_rgba(0,0,0,0.6)] ${
+        highlighted
+          ? "border-violet-500 ring-1 ring-violet-400/60 shadow-[0_0_35px_-10px_rgba(139,92,246,0.8)]"
+          : "border-neutral-200 hover:border-neutral-400"
+      } ${dimmed ? "opacity-45 saturate-50" : ""}`}
+      style={{
+        backgroundImage: `radial-gradient(120% 80% at 100% 0%, #${glow}1f, transparent 55%)`,
+      }}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-12 -right-12 h-32 w-32 rounded-full opacity-25 blur-3xl transition-opacity group-hover:opacity-60"
+        style={{ background: `#${glow}` }}
+      />
+      <div className="relative flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold leading-tight">{recipe.label}</div>
+          {pattern && (
+            <div className="mt-0.5 text-[11px] text-neutral-500">{pattern.description}</div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {isDefault && (
+            <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[9px] uppercase tracking-wider text-amber-700">
+              default
+            </span>
+          )}
+          <span
+            className={`rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wider ${
+              BUDGET_CHIP[recipe.controls.budgetClass] ?? "bg-foreground/10 text-foreground/70"
+            }`}
+          >
+            {recipe.controls.budgetClass} $
+          </span>
+        </div>
+      </div>
+
+      {/* Stage topology: role chips joined by arrows, fan-out annotated. */}
+      {pattern && (
+        <div className="relative mt-3 flex flex-wrap items-center gap-1 text-[10px]">
+          {pattern.stages.map((s, i) => (
+            <span key={s.id} className="inline-flex items-center gap-1">
+              {i > 0 && <span className="text-violet-500">→</span>}
+              <span className="rounded-md border border-violet-300 bg-violet-100 px-1.5 py-0.5 text-violet-700">
+                {s.role}
+                {s.fanOut > 1 && (
+                  <span className="ml-1 font-semibold text-violet-600">×{s.fanOut}</span>
+                )}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Roles resolved against the live roster. */}
+      <div className="relative mt-3 space-y-1.5">
+        {roles.map((r) => (
+          <div key={r.role.id} className="flex items-center gap-2 text-[11px]">
+            <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-neutral-500">
+              {r.role.id}
+            </span>
+            {r.models.length === 0 ? (
+              <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] text-amber-700">
+                unresolved — roster too small
+              </span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-1.5">
+                {r.models.map((m) => {
+                  const chipBrand = resolveVendor(m.vendorKey, m.vendor);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => onInspect(m.id)}
+                      title={`${m.name} · ${r.role.choose} · effort ${r.role.effort}`}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 px-2 py-0.5 font-medium text-neutral-900 transition-all hover:-translate-y-px hover:border-neutral-500"
+                      style={{ background: `#${chipBrand.color}1a` }}
+                    >
+                      <VendorLogo vendorKey={m.vendorKey} vendorName={m.vendor} size={12} />
+                      <span className="max-w-36 truncate">{m.name}</span>
+                    </button>
+                  );
+                })}
+                <span className="rounded border border-neutral-200 bg-neutral-100 px-1 py-px font-mono text-[9px] text-neutral-600">
+                  {r.role.effort}
+                </span>
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="relative mt-3 flex items-center justify-between text-[10px] text-neutral-500">
+        <span>
+          ∥{recipe.controls.maxParallel} · rounds {recipe.controls.maxRounds} ·{" "}
+          {recipe.controls.onDisagreement}
+        </span>
+        <button
+          type="button"
+          onClick={copyPlan}
+          className={`inline-flex items-center gap-1 transition-colors hover:text-neutral-900 ${
+            complete ? "" : "text-amber-600"
+          }`}
+        >
+          <Copy className="h-3 w-3" />
+          Copy plan JSON
+        </button>
+      </div>
     </div>
   );
 }
@@ -1311,12 +1667,14 @@ function RosterToggle({
 function InspectDrawer({
   model,
   curatedAsOf,
+  orchestratesAs,
   leaderboards,
   onClose,
   onCopyOne,
 }: {
   model: ModelIntel;
   curatedAsOf: string;
+  orchestratesAs?: string[];
   leaderboards: { label: string; url: string }[];
   onClose: () => void;
   onCopyOne: () => void;
@@ -1446,6 +1804,10 @@ function InspectDrawer({
             </div>
             <p className="text-[11px] leading-relaxed text-foreground/80">{model.proUsage}</p>
           </div>
+
+          {orchestratesAs && orchestratesAs.length > 0 && (
+            <DotList title="Orchestrates as" items={orchestratesAs} dot="#8b5cf6" />
+          )}
 
           <div className="flex flex-col gap-1.5">
             <DeepLink href={model.links.openrouter} label="OpenRouter" />

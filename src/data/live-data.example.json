@@ -39,7 +39,7 @@
         "usage": {
           "conversations": 0,
           "lastActiveMs": null,
-          "lastActiveAgo": "\u2014",
+          "lastActiveAgo": "—",
           "savedEquivalent": 0
         },
         "surfaces": {
@@ -164,5 +164,79 @@
     "missing": [],
     "nodes": [],
     "links": []
-  }
+  },
+  "history": [
+    {
+      "date": "2026-06-09",
+      "capturedAt": "2026-06-09T07:00:00.000Z",
+      "messages7d": 40,
+      "value7d": 180,
+      "projects": 3,
+      "assistantTotal": 2400,
+      "claude5hPct": 6,
+      "claudeWeeklyPct": 2,
+      "skillRuns7d": 0,
+      "dreamPrescriptions": 4
+    },
+    {
+      "date": "2026-06-10",
+      "capturedAt": "2026-06-10T07:00:00.000Z",
+      "messages7d": 49,
+      "value7d": 208,
+      "projects": 3,
+      "assistantTotal": 2520,
+      "claude5hPct": 9,
+      "claudeWeeklyPct": 3,
+      "skillRuns7d": 1,
+      "dreamPrescriptions": 4
+    },
+    {
+      "date": "2026-06-11",
+      "capturedAt": "2026-06-11T07:00:00.000Z",
+      "messages7d": 58,
+      "value7d": 236,
+      "projects": 3,
+      "assistantTotal": 2640,
+      "claude5hPct": 12,
+      "claudeWeeklyPct": 3,
+      "skillRuns7d": 1,
+      "dreamPrescriptions": 4
+    },
+    {
+      "date": "2026-06-12",
+      "capturedAt": "2026-06-12T07:00:00.000Z",
+      "messages7d": 67,
+      "value7d": 264,
+      "projects": 3,
+      "assistantTotal": 2760,
+      "claude5hPct": 8,
+      "claudeWeeklyPct": 4,
+      "skillRuns7d": 2,
+      "dreamPrescriptions": 4
+    },
+    {
+      "date": "2026-06-13",
+      "capturedAt": "2026-06-13T07:00:00.000Z",
+      "messages7d": 76,
+      "value7d": 292,
+      "projects": 3,
+      "assistantTotal": 2880,
+      "claude5hPct": 14,
+      "claudeWeeklyPct": 4,
+      "skillRuns7d": 1,
+      "dreamPrescriptions": 4
+    },
+    {
+      "date": "2026-06-14",
+      "capturedAt": "2026-06-14T07:00:00.000Z",
+      "messages7d": 85,
+      "value7d": 320,
+      "projects": 3,
+      "assistantTotal": 3000,
+      "claude5hPct": 10,
+      "claudeWeeklyPct": 5,
+      "skillRuns7d": 3,
+      "dreamPrescriptions": 4
+    }
+  ]
 }

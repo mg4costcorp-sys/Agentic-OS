@@ -1,7 +1,16 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, Sparkles, Brain, Activity, Waypoints, Settings as SettingsIcon } from "lucide-react";
+import {
+  BrainCircuit,
+  Home,
+  LayoutDashboard,
+  Palette,
+  Settings as SettingsIcon,
+  Waypoints,
+  Menu,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import claudeLogo from "@/assets/claude-logo.png";
 import hermesLogo from "@/assets/hermes-agent.png";
 import openclawLogo from "@/assets/openclaw.png";
@@ -85,10 +94,9 @@ function SidebarIdentity() {
 
 const primary = [
   { to: "/", label: "Home", icon: Home },
-  { to: "/skills", label: "Skills", icon: Sparkles },
-  { to: "/memory", label: "Memory", icon: Brain },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/memory", label: "Memory", icon: BrainCircuit },
   { to: "/codegraph", label: "Knowledge Graph", icon: Waypoints },
-  { to: "/activity", label: "Activity", icon: Activity },
 ];
 
 const agents = [
@@ -96,12 +104,17 @@ const agents = [
   { to: "/agents/openclaw", label: "OpenClaw", logo: openclawLogo, tone: "#EF4444" },
 ];
 
-export function AppSidebar() {
+// SidebarBody — the actual sidebar content (brand mark, primary nav, agents,
+// settings, identity). Extracted so both the fixed desktop AppSidebar and the
+// mobile Sheet drawer render the same list. `onNavigate` fires on every link
+// tap so the mobile drawer can close itself.
+function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
+  const settingsActive = isActive("/settings") || isActive("/skills");
 
   return (
-    <aside className="hidden md:flex w-56 shrink-0 flex-col border-r border-border bg-sidebar sticky top-0 h-screen self-start overflow-y-auto">
+    <div className="flex h-full flex-col">
       {/* Brand mark — Claude logo with a soft orange halo so it reads as
           the primary identity and not just another tile. */}
       <div className="flex h-14 items-center gap-2.5 px-5">
@@ -130,6 +143,7 @@ export function AppSidebar() {
             <Link
               key={item.to}
               to={item.to}
+              onClick={onNavigate}
               className={cn(
                 "relative flex items-center gap-3 rounded-md px-2.5 py-2 text-[13px] transition-colors",
                 active
@@ -165,6 +179,7 @@ export function AppSidebar() {
               <Link
                 key={a.to}
                 to={a.to}
+                onClick={onNavigate}
                 title={a.label}
                 aria-label={a.label}
                 className={cn(
@@ -193,13 +208,53 @@ export function AppSidebar() {
         </div>
       </nav>
 
+      {/* Experimental surfaces sit below the main nav and above Settings —
+          close enough to reach, far enough that they don't compete with the
+          established routes while they're still finding their shape. */}
+      <div className="px-3 pb-1">
+        <div className="h-px bg-border/60 mb-2" />
+        <Link
+          to="/design"
+          onClick={onNavigate}
+          className={cn(
+            "relative flex items-center gap-3 rounded-md px-2.5 py-2 text-[13px] transition-colors",
+            isActive("/design")
+              ? "bg-violet-500/[0.09] font-medium text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          )}
+        >
+          {isActive("/design") && (
+            <span
+              aria-hidden
+              className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-r-full"
+              style={{
+                background: "linear-gradient(180deg, #d8b4fe, #8b5cf6)",
+                boxShadow: "0 0 10px rgba(139, 92, 246, 0.7)",
+              }}
+            />
+          )}
+          <Palette className="h-4 w-4 shrink-0" />
+          <span className="flex-1">Design</span>
+          <span
+            className="text-[8px] uppercase tracking-[0.14em] px-1.5 py-0.5 rounded"
+            style={{
+              color: "#f0abfc",
+              border: "1px solid rgba(240,171,252,0.35)",
+            }}
+          >
+            Beta
+          </span>
+        </Link>
+      </div>
+
       <div className="px-3 pb-3">
         <div className="h-px bg-border mb-2" />
         <Link
           to="/settings"
+          onClick={onNavigate}
           className={cn(
             "flex items-center gap-3 rounded-md px-2.5 py-2 text-[13px] transition-colors",
-            isActive("/settings")
+            settingsActive
               ? "bg-accent text-foreground font-medium"
               : "text-muted-foreground/70 hover:text-foreground hover:bg-accent/50",
           )}
@@ -212,6 +267,38 @@ export function AppSidebar() {
       <div className="border-t border-border px-4 py-3">
         <SidebarIdentity />
       </div>
+    </div>
+  );
+}
+
+// AppSidebar — desktop-only fixed left rail. Hidden below md; on mobile the
+// same content is served by MobileNav via a Sheet drawer.
+export function AppSidebar() {
+  return (
+    <aside className="hidden md:flex w-56 shrink-0 flex-col border-r border-border bg-sidebar sticky top-0 h-screen self-start overflow-y-auto">
+      <SidebarBody />
     </aside>
+  );
+}
+
+// MobileNav — hamburger button that opens the sidebar in a Sheet drawer on
+// mobile. Rendered in the top-bar of __root.tsx alongside the "Operator /
+// local" label. The button hides on md+ where the fixed sidebar takes over.
+export function MobileNav() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <button
+          className="md:hidden -ml-1 rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          aria-label="Open navigation"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-72 max-w-[85vw] p-0 bg-sidebar">
+        <SidebarBody onNavigate={() => setOpen(false)} />
+      </SheetContent>
+    </Sheet>
   );
 }

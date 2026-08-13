@@ -12,9 +12,11 @@ import {
   Lock,
   Wand2,
   ArrowRight,
+  LibraryBig,
 } from "lucide-react";
 import claudeLogo from "@/assets/claude-logo.png";
 import { useLiveData } from "@/lib/use-live-data";
+import { CurrencyPicker } from "@/components/currency-picker";
 
 let ld: any = {};
 let isDemoData = true;
@@ -94,27 +96,53 @@ function SettingsPage() {
         }
       />
 
-      <Link
-        to="/setup"
-        className="group flex items-center justify-between rounded-xl border border-border bg-card hover:border-foreground/30 transition-all p-4 mb-6 relative overflow-hidden"
-        style={{
-          backgroundImage:
-            "radial-gradient(120% 80% at 0% 0%, rgba(255,138,61,0.12), transparent 60%)",
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 grid place-items-center shrink-0">
-            <img src={claudeLogo} alt="" width={32} height={32} className="drop-shadow" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold tracking-tight">Re-run setup wizard</div>
-            <div className="text-xs text-muted-foreground">
-              Re-detect tools, change paths, adjust Dream cadence and time value.
+      <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Link
+          to="/setup"
+          className="group relative flex items-center justify-between overflow-hidden rounded-xl border border-border bg-card p-4 transition-all hover:border-foreground/30"
+          style={{
+            backgroundImage:
+              "radial-gradient(120% 80% at 0% 0%, rgba(255,138,61,0.12), transparent 60%)",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center">
+              <img src={claudeLogo} alt="" width={32} height={32} className="drop-shadow" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">Re-run setup wizard</div>
+              <div className="text-xs text-muted-foreground">
+                Re-detect tools, paths and operating preferences.
+              </div>
             </div>
           </div>
-        </div>
-        <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
-      </Link>
+          <ArrowRight className="h-4 w-4 text-muted-foreground transition-all group-hover:translate-x-0.5 group-hover:text-foreground" />
+        </Link>
+
+        <Link
+          to="/skills"
+          className="group relative flex items-center justify-between overflow-hidden rounded-xl border border-border bg-card p-4 transition-all hover:border-violet-300/30"
+          style={{
+            backgroundImage:
+              "radial-gradient(120% 90% at 0% 0%, rgba(139,92,246,0.12), transparent 62%)",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-violet-300/15 bg-violet-400/[0.07]">
+              <LibraryBig className="h-5 w-5 text-violet-300/80" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">Skills library</div>
+              <div className="text-xs text-muted-foreground">
+                Browse installed skills and inspect where they came from.
+              </div>
+            </div>
+          </div>
+          <ArrowRight className="h-4 w-4 text-muted-foreground transition-all group-hover:translate-x-0.5 group-hover:text-foreground" />
+        </Link>
+      </div>
+
+      <CurrencyPicker />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <Group title="Workspace folders" icon={Folder}>

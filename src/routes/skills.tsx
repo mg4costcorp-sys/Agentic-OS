@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { skills as sampleSkills, skillCategories } from "@/lib/mock-data";
 import { useState, useMemo } from "react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
@@ -14,6 +14,7 @@ import {
   Clock,
   DollarSign,
   RotateCcw,
+  ChevronRight,
 } from "lucide-react";
 import skillsHero from "@/assets/skills/skills-hero.png";
 import { useTimeSaved, runsIn, formatHours, type Period } from "@/lib/time-saved";
@@ -143,6 +144,14 @@ function SkillsPage() {
 
   return (
     <div className="max-w-[1400px]">
+      <div className="mb-4 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Link to="/settings" className="transition-colors hover:text-foreground">
+          Settings
+        </Link>
+        <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+        <span className="text-foreground/70">Skills library</span>
+      </div>
+
       {/* Hero */}
       <section className="relative rounded-xl overflow-hidden border border-border mb-10 aspect-[16/9] max-h-[420px] bg-card">
         <img

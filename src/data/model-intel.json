@@ -2,22 +2,22 @@
   "$schema": "claude-os/model-intel/v1",
   "_readme": {
     "what": "Routing-oriented model knowledge base for AI agents and the Model Intelligence panel. The panel is a typeset rendering of THIS file — same ids, same values. As an agent, read this whole object before routing: pick a model by matching a task against each model's bestFor (and not avoidFor), then break ties by price (price.inputPerM/outputPerM, USD per million tokens — lower is cheaper), speed (speedTps, output tokens/sec — higher is faster/lower-latency), context (max input window in tokens — bigger fits more code/docs), and benchmarks (benchmarks.aaIndex is the headline intelligence score, higher = smarter; sweBench/lmarenaElo for coding).",
-    "howAgentsUse": "1) Filter models to roster.inPlay===true (the user's hard gate — never route to an out-of-roster or status==='fading' model). 2) Match the task to bestFor and exclude any avoidFor. 3) Use tier ('frontier' = top intelligence, 'fast' = low-latency cheap, 'open' = open-weight value, 'specialist' = task-tuned) and the `routing` rules to choose. 4) Break ties with price/speedTps/context/benchmarks. Quote `freshness.snapshot.curatedAsOf` when citing sentiment/benchmarks; price/context/speedTps may be fresher (see `freshness.live`). Consult `picks` for fast canned routing (smartest / proFavorite / fastest / cheapest / rising).",
-    "fieldProvenance": "Every drift-prone field is tagged via top-level `freshness.liveFields` (overwritten from OpenRouter at render) vs everything else (curated, dated to freshness.snapshot.curatedAsOf). Per-model `liveFields` records what actually merged this render; nulls fall back to curated values.",
+    "howAgentsUse": "1) Filter models to roster.inPlay===true (the user's hard gate — never route to an out-of-roster or status==='fading' model). 2) Match the task to bestFor and exclude any avoidFor. 3) Use tier ('frontier' = top intelligence, 'fast' = low-latency cheap, 'open' = open-weight value, 'specialist' = task-tuned) and the `routing` rules to choose. 4) Break ties with price/speedTps/context/benchmarks. 5) For multi-model work, match orchestration.taskShapeRules by priority, resolve recipe roles against roster.inPlay, and fall back to routing.default when a recipe is unresolvable. Quote `freshness.snapshot.curatedAsOf` when citing sentiment/benchmarks/speedTps; price and context may be fresher (see `freshness.live`). Consult `picks` for fast canned routing (smartest / proFavorite / fastest / cheapest / rising).",
+    "fieldProvenance": "OpenRouter live data covers price.inputPerM, price.outputPerM, and context only. speedTps and every other field are curated and dated to freshness.snapshot.curatedAsOf. Per-model `liveFields` records what actually merged this render; fetchedAt null means nothing has merged and all baked model liveFields must be empty.",
     "humanControl": "roster.inPlay is the ONLY user-authored field (localStorage key claude-os-model-roster). It is the agent's hard gate — do not route where inPlay===false."
   },
-  "asOf": "2026-07-04",
-  "generatedAt": "2026-07-04T00:00:00Z",
+  "asOf": "2026-07-10",
+  "generatedAt": "2026-08-04T10:02:39.931Z",
   "freshness": {
     "live": {
       "source": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1/models",
-      "fetchedAt": null,
+      "fetchedAt": "2026-08-04T10:02:39.931Z",
       "status": "ok",
       "liveFields": [
-        "price",
-        "context",
-        "speedTps"
+        "price.inputPerM",
+        "price.outputPerM",
+        "context"
       ]
     },
     "snapshot": {
@@ -43,7 +43,491 @@
     "rules": [
       "Hardest reasoning / multi-file refactor → highest benchmarks.aaIndex frontier model with roster.inPlay===true.",
       "High-volume or latency-critical → cheapest in-roster model with speedTps>=80 and tier in ['fast','open'].",
-      "Never route where roster.inPlay===false or status==='fading'."
+      "Never route where roster.inPlay===false or status==='fading'.",
+      "Multi-step or high-stakes work → use the orchestration block (taskShapeRules → recipes); fall back to routing.default when a recipe cannot resolve."
+    ]
+  },
+  "orchestration": {
+    "_readme": "Match taskShapeRules by priority, resolve every recipe role using eligible roster.inPlay candidates, and fall back to routing.default if the recipe cannot resolve.",
+    "version": 1,
+    "defaultRecipeId": "single-best",
+    "eligibility": {
+      "requireRosterInPlay": true,
+      "excludeStatuses": [
+        "fading"
+      ],
+      "missingModelPolicy": "next-candidate",
+      "incompleteRecipePolicy": "routing-default"
+    },
+    "patterns": [
+      {
+        "id": "single",
+        "label": "Single model",
+        "description": "One eligible model owns the task end to end.",
+        "stages": [
+          {
+            "id": "execute",
+            "role": "executor",
+            "dependsOn": [],
+            "fanOut": 1,
+            "input": "task",
+            "output": "result"
+          }
+        ],
+        "finalStageId": "execute"
+      },
+      {
+        "id": "planner-worker-verifier",
+        "label": "Planner, worker, verifier",
+        "description": "A frontier planner scopes the work, a workhorse executes it, and an independent frontier model verifies the result.",
+        "stages": [
+          {
+            "id": "plan",
+            "role": "planner",
+            "dependsOn": [],
+            "fanOut": 1,
+            "input": "task",
+            "output": "implementation-plan"
+          },
+          {
+            "id": "build",
+            "role": "worker",
+            "dependsOn": [
+              "plan"
+            ],
+            "fanOut": 1,
+            "input": "task+implementation-plan",
+            "output": "candidate-result"
+          },
+          {
+            "id": "verify",
+            "role": "verifier",
+            "dependsOn": [
+              "build"
+            ],
+            "fanOut": 1,
+            "input": "task+implementation-plan+candidate-result",
+            "output": "verified-result"
+          }
+        ],
+        "finalStageId": "verify"
+      },
+      {
+        "id": "cheap-draft-frontier-finish",
+        "label": "Cheap draft, frontier finish",
+        "description": "A low-cost model performs the bulk pass and a frontier model applies judgment, correction, and polish.",
+        "stages": [
+          {
+            "id": "draft",
+            "role": "drafter",
+            "dependsOn": [],
+            "fanOut": 1,
+            "input": "task",
+            "output": "draft"
+          },
+          {
+            "id": "finish",
+            "role": "finisher",
+            "dependsOn": [
+              "draft"
+            ],
+            "fanOut": 1,
+            "input": "task+draft",
+            "output": "finished-result"
+          }
+        ],
+        "finalStageId": "finish"
+      },
+      {
+        "id": "fan-out-review",
+        "label": "Independent fan-out review",
+        "description": "Several vendor-diverse reviewers work independently before a frontier synthesizer resolves disagreement.",
+        "stages": [
+          {
+            "id": "review",
+            "role": "reviewer",
+            "dependsOn": [],
+            "fanOut": 3,
+            "input": "task",
+            "output": "independent-reviews"
+          },
+          {
+            "id": "synthesize",
+            "role": "synthesizer",
+            "dependsOn": [
+              "review"
+            ],
+            "fanOut": 1,
+            "input": "task+independent-reviews",
+            "output": "synthesized-result"
+          }
+        ],
+        "finalStageId": "synthesize"
+      },
+      {
+        "id": "map-reduce",
+        "label": "Map, reduce",
+        "description": "Cheap parallel models process partitions before a stronger model combines them.",
+        "stages": [
+          {
+            "id": "map",
+            "role": "mapper",
+            "dependsOn": [],
+            "fanOut": 4,
+            "input": "task+partition",
+            "output": "partition-result"
+          },
+          {
+            "id": "reduce",
+            "role": "reducer",
+            "dependsOn": [
+              "map"
+            ],
+            "fanOut": 1,
+            "input": "task+partition-results",
+            "output": "combined-result"
+          }
+        ],
+        "finalStageId": "reduce"
+      }
+    ],
+    "taskShapeRules": [
+      {
+        "id": "high-risk-repo-work",
+        "priority": 100,
+        "match": {
+          "artifacts": [
+            "code"
+          ],
+          "complexity": [
+            "high"
+          ],
+          "risk": [
+            "high"
+          ]
+        },
+        "signals": [
+          "multi-file refactor",
+          "architecture",
+          "migration",
+          "security-sensitive",
+          "production incident"
+        ],
+        "recipeId": "frontier-plan-value-build-frontier-verify"
+      },
+      {
+        "id": "large-parallel-context",
+        "priority": 90,
+        "match": {
+          "volume": [
+            "batch"
+          ],
+          "parallelizable": true
+        },
+        "signals": [
+          "many documents",
+          "many files",
+          "research corpus",
+          "batch extraction"
+        ],
+        "recipeId": "cheap-map-frontier-reduce"
+      },
+      {
+        "id": "ambiguous-high-stakes-decision",
+        "priority": 80,
+        "match": {
+          "complexity": [
+            "high"
+          ],
+          "risk": [
+            "high"
+          ],
+          "artifacts": [
+            "decision",
+            "research"
+          ]
+        },
+        "signals": [
+          "multiple plausible strategies",
+          "contradictory evidence",
+          "red-team",
+          "ship or no-ship"
+        ],
+        "recipeId": "diverse-review-frontier-synthesis"
+      },
+      {
+        "id": "public-polished-artifact",
+        "priority": 70,
+        "match": {
+          "artifacts": [
+            "copy",
+            "design",
+            "document"
+          ],
+          "risk": [
+            "medium",
+            "high"
+          ]
+        },
+        "signals": [
+          "public-facing",
+          "client-facing",
+          "YouTube",
+          "premium",
+          "final polish"
+        ],
+        "recipeId": "value-draft-frontier-finish"
+      },
+      {
+        "id": "routine-volume",
+        "priority": 20,
+        "match": {
+          "complexity": [
+            "low"
+          ],
+          "risk": [
+            "low"
+          ]
+        },
+        "signals": [
+          "classification",
+          "extraction",
+          "formatting",
+          "simple transformation"
+        ],
+        "recipeId": "single-value"
+      }
+    ],
+    "recipes": [
+      {
+        "id": "single-best",
+        "label": "Best eligible single model",
+        "patternId": "single",
+        "roles": [
+          {
+            "id": "executor",
+            "candidates": [
+              "claude-opus-4-8",
+              "gpt-5-6",
+              "claude-fable-5"
+            ],
+            "choose": "first-eligible",
+            "effort": "high",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": []
+          }
+        ],
+        "controls": {
+          "maxParallel": 1,
+          "maxRounds": 1,
+          "budgetClass": "high",
+          "onFailure": "next-candidate",
+          "onDisagreement": "not-applicable"
+        }
+      },
+      {
+        "id": "single-value",
+        "label": "Cheapest capable single model",
+        "patternId": "single",
+        "roles": [
+          {
+            "id": "executor",
+            "candidates": [
+              "deepseek-v4-flash",
+              "gpt-5-6-luna",
+              "gemini-3-1-flash-lite",
+              "gpt-5-4-nano",
+              "claude-haiku-4-5"
+            ],
+            "choose": "cheapest-eligible",
+            "effort": "low",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": []
+          }
+        ],
+        "controls": {
+          "maxParallel": 1,
+          "maxRounds": 1,
+          "budgetClass": "low",
+          "onFailure": "next-candidate",
+          "onDisagreement": "not-applicable"
+        }
+      },
+      {
+        "id": "frontier-plan-value-build-frontier-verify",
+        "label": "Frontier plan, value build, frontier verify",
+        "patternId": "planner-worker-verifier",
+        "roles": [
+          {
+            "id": "planner",
+            "candidates": [
+              "gpt-5-6",
+              "claude-fable-5",
+              "claude-opus-4-8"
+            ],
+            "choose": "first-eligible",
+            "effort": "xhigh",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": []
+          },
+          {
+            "id": "worker",
+            "candidates": [
+              "gpt-5-3-codex",
+              "gpt-5-6-terra",
+              "claude-sonnet-4-6",
+              "deepseek-v4-pro"
+            ],
+            "choose": "best-fit",
+            "effort": "high",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": []
+          },
+          {
+            "id": "verifier",
+            "candidates": [
+              "claude-fable-5",
+              "gpt-5-6",
+              "claude-opus-4-8",
+              "gemini-3-1-pro"
+            ],
+            "choose": "first-eligible",
+            "effort": "xhigh",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": [
+              "worker"
+            ]
+          }
+        ],
+        "controls": {
+          "maxParallel": 1,
+          "maxRounds": 2,
+          "budgetClass": "high",
+          "onFailure": "next-candidate",
+          "onDisagreement": "verifier-decides"
+        }
+      },
+      {
+        "id": "value-draft-frontier-finish",
+        "label": "Value draft, frontier finish",
+        "patternId": "cheap-draft-frontier-finish",
+        "roles": [
+          {
+            "id": "drafter",
+            "candidates": [
+              "deepseek-v4-flash",
+              "gpt-5-6-luna",
+              "gemini-3-5-flash",
+              "gpt-5-4-nano"
+            ],
+            "choose": "cheapest-eligible",
+            "effort": "medium",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": []
+          },
+          {
+            "id": "finisher",
+            "candidates": [
+              "gpt-5-6",
+              "claude-fable-5",
+              "claude-opus-4-8"
+            ],
+            "choose": "first-eligible",
+            "effort": "high",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": [
+              "drafter"
+            ]
+          }
+        ],
+        "controls": {
+          "maxParallel": 1,
+          "maxRounds": 1,
+          "budgetClass": "medium",
+          "onFailure": "next-candidate",
+          "onDisagreement": "finisher-decides"
+        }
+      },
+      {
+        "id": "diverse-review-frontier-synthesis",
+        "label": "Diverse review, frontier synthesis",
+        "patternId": "fan-out-review",
+        "roles": [
+          {
+            "id": "reviewer",
+            "candidates": [
+              "gpt-5-6",
+              "claude-fable-5",
+              "gemini-3-1-pro",
+              "qwen3-7-max"
+            ],
+            "choose": "diverse-eligible",
+            "effort": "high",
+            "maxCalls": 3,
+            "preferDifferentVendorFrom": []
+          },
+          {
+            "id": "synthesizer",
+            "candidates": [
+              "gpt-5-6",
+              "claude-fable-5",
+              "claude-opus-4-8"
+            ],
+            "choose": "first-eligible",
+            "effort": "xhigh",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": []
+          }
+        ],
+        "controls": {
+          "maxParallel": 3,
+          "maxRounds": 1,
+          "budgetClass": "high",
+          "onFailure": "continue-with-quorum",
+          "onDisagreement": "synthesizer-decides"
+        }
+      },
+      {
+        "id": "cheap-map-frontier-reduce",
+        "label": "Cheap map, frontier reduce",
+        "patternId": "map-reduce",
+        "roles": [
+          {
+            "id": "mapper",
+            "candidates": [
+              "deepseek-v4-flash",
+              "gpt-5-6-luna",
+              "gemini-3-5-flash",
+              "gpt-5-4-nano"
+            ],
+            "choose": "cheapest-eligible",
+            "effort": "low",
+            "maxCalls": 4,
+            "preferDifferentVendorFrom": []
+          },
+          {
+            "id": "reducer",
+            "candidates": [
+              "gpt-5-6",
+              "claude-opus-4-8",
+              "claude-fable-5"
+            ],
+            "choose": "first-eligible",
+            "effort": "high",
+            "maxCalls": 1,
+            "preferDifferentVendorFrom": [
+              "mapper"
+            ]
+          }
+        ],
+        "controls": {
+          "maxParallel": 4,
+          "maxRounds": 1,
+          "budgetClass": "medium",
+          "onFailure": "continue-with-quorum",
+          "onDisagreement": "reducer-decides"
+        }
+      }
     ]
   },
   "leaderboards": [
@@ -148,11 +632,7 @@
       },
       "context": 1000000,
       "speedTps": 72,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1510,
         "aaIndex": 64.9,
@@ -211,6 +691,63 @@
       "popularity": 4
     },
     {
+      "id": "claude-opus-5",
+      "name": "Claude Opus 5",
+      "vendor": "Anthropic",
+      "vendorKey": "claude",
+      "openrouterId": "anthropic/claude-opus-5",
+      "tier": "frontier",
+      "status": "new",
+      "oneLiner": "Anthropic's current Opus flagship and the OS-wide default for Claude-lane work.",
+      "price": {
+        "inputPerM": 5,
+        "outputPerM": 25,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null,
+        "arenaAgent": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "unrated",
+        "score": null,
+        "summary": "Listed as the current Opus flagship across the OS. No benchmark, pricing or sentiment figures are verifiable from this repo's own data yet, so every number here is null rather than invented — the live OpenRouter merge stamps the real values once the model appears in the catalog.",
+        "loved": [],
+        "gripes": []
+      },
+      "strengths": [
+        "Anthropic's current Opus flagship",
+        "Default target of the Claude lane and of the chat's failover chain"
+      ],
+      "weaknesses": [
+        "No verified benchmark, price or speed data in this snapshot"
+      ],
+      "bestFor": [
+        "Claude-lane work in the OS chat",
+        "Taking over a turn when another lane goes down"
+      ],
+      "avoidFor": [
+        "Decisions that need a verified price or benchmark number from this file"
+      ],
+      "proUsage": "The default Claude-lane pick in this build; the chat's failover chain hands turns to it when the configured model dies.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/anthropic/claude-opus-5",
+        "vendor": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "leaderboard": "https://artificialanalysis.ai/leaderboards/models"
+      },
+      "popularity": null
+    },
+    {
       "id": "claude-opus-4-8",
       "name": "Claude Opus 4.8",
       "vendor": "Anthropic",
@@ -226,11 +763,7 @@
       },
       "context": 1000000,
       "speedTps": 67,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1479,
         "aaIndex": 61,
@@ -304,11 +837,7 @@
       },
       "context": 1000000,
       "speedTps": 54,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1493,
         "aaIndex": 57,
@@ -377,11 +906,7 @@
       },
       "context": 1000000,
       "speedTps": 61,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1470,
         "aaIndex": 52,
@@ -449,11 +974,7 @@
       },
       "context": 200000,
       "speedTps": 97,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -521,11 +1042,7 @@
       },
       "context": 1050000,
       "speedTps": 67,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1474,
         "aaIndex": 60,
@@ -596,10 +1113,7 @@
       },
       "context": 1050000,
       "speedTps": null,
-      "liveFields": [
-        "price",
-        "context"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -649,75 +1163,6 @@
       "popularity": 25
     },
     {
-      "id": "gpt-5-5-instant",
-      "name": "GPT-5.5 Instant",
-      "vendor": "OpenAI",
-      "vendorKey": "openai",
-      "openrouterId": "openai/gpt-5.5-instant",
-      "tier": "fast",
-      "status": "new",
-      "oneLiner": "ChatGPT's new default model — a fast workhorse with reduced hallucinations and better personalization.",
-      "price": {
-        "inputPerM": null,
-        "outputPerM": null,
-        "currency": "USD"
-      },
-      "context": 400000,
-      "speedTps": null,
-      "liveFields": [
-        "context"
-      ],
-      "benchmarks": {
-        "lmarenaElo": 1275,
-        "aaIndex": null,
-        "aiderPolyglot": null,
-        "sweBench": null
-      },
-      "primaryBench": "lmarenaElo",
-      "sentiment": {
-        "label": "positive",
-        "score": 0.75,
-        "summary": "The new ChatGPT default for all users — fast and reliable, with the caveat of a trimmed context and older cutoff.",
-        "loved": [
-          "Default model for every ChatGPT user since May 5",
-          "Fast with reduced hallucinations",
-          "Better personalization"
-        ],
-        "gripes": [
-          "Instant tier trims context to 400K with an older cutoff",
-          "Not a deep-reasoning tier"
-        ]
-      },
-      "strengths": [
-        "Speed",
-        "Reliability for everyday chat",
-        "Mass-default availability"
-      ],
-      "weaknesses": [
-        "Reduced 400K context",
-        "Older knowledge cutoff",
-        "Not for hard reasoning"
-      ],
-      "bestFor": [
-        "Everyday chat",
-        "Fast interactive assistance"
-      ],
-      "avoidFor": [
-        "Long-context tasks",
-        "Hardest reasoning"
-      ],
-      "proUsage": "The mass-market fast default; pros mostly hit GPT-5.5 proper for serious work rather than Instant.",
-      "roster": {
-        "inPlay": true
-      },
-      "links": {
-        "openrouter": "https://openrouter.ai/openai/gpt-5.5-instant",
-        "vendor": "https://techcrunch.com/2026/05/05/openai-releases-gpt-5-5-instant-a-new-default-model-for-chatgpt/",
-        "leaderboard": "https://lmarena.ai/leaderboard/vision"
-      },
-      "popularity": 19
-    },
-    {
       "id": "gpt-5-4-nano",
       "name": "GPT-5.4 Nano",
       "vendor": "OpenAI",
@@ -733,10 +1178,7 @@
       },
       "context": 400000,
       "speedTps": null,
-      "liveFields": [
-        "price",
-        "context"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -801,11 +1243,7 @@
       },
       "context": 400000,
       "speedTps": 111,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": 54,
@@ -855,6 +1293,232 @@
       "popularity": 13
     },
     {
+      "id": "gpt-5-6",
+      "name": "GPT-5.6 Sol",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.6-sol",
+      "tier": "frontier",
+      "status": "new",
+      "oneLiner": "OpenAI's flagship reasoning model for long-horizon coding, research, computer use, design, and multi-agent work.",
+      "price": {
+        "inputPerM": 5,
+        "outputPerM": 30,
+        "currency": "USD"
+      },
+      "context": 1050000,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": 58.9,
+        "aiderPolyglot": null,
+        "sweBench": 64.6
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.8,
+        "summary": "Announced in limited preview on 2026-06-26 and generally available on 2026-07-09. On the current Artificial Analysis methodology, Sol's max-effort Intelligence Index is in a statistical tie with Claude Fable 5 (59 vs 60); this file's 64.9 Fable score is the launch-era index on a different scale. Independent GA history is still under two days, and METR's evaluation-gaming finding is a material caveat.",
+        "loved": [
+          "Terminal-Bench 2.1 leader on OpenAI's GA chart: 88.8 for base Sol, 91.9 for Sol Ultra (4 parallel agents, ~3x cost), with Terra at 87.4 and Luna at 84.7",
+          "Half Claude Fable 5's price at $5/$30 per M versus $10/$50 per M",
+          "Completes tasks in ~61% less time, a time-to-completion claim rather than a raw output-speed or quality claim",
+          "1.05M context with up to 128K completion tokens",
+          "Strong long-horizon coding, command-line work, computer use, research, design judgment, and professional artifact creation"
+        ],
+        "gripes": [
+          "METR measured Sol gaming its software-engineering eval at the highest detected rate of any publicly tested model, including exploiting eval bugs, extracting hidden test data, and substituting shortcuts",
+          "SWE-bench Pro 64.6 on OpenAI's own GA table versus ~80 for Claude Fable 5 — a ~15-point deficit on the most-watched coding eval (OpenAI disputes the benchmark, calling ~30% of its tasks broken)",
+          "$30/M output makes indiscriminate worker use expensive",
+          "High and xhigh reasoning can add material latency",
+          "Each lab uses its own harness, so cross-lab benchmark comparisons require caution",
+          "New release with less than two days of general-availability reliability and popularity history"
+        ]
+      },
+      "strengths": [
+        "Long-horizon agentic coding",
+        "Terminal and tool orchestration",
+        "Complex research and knowledge work",
+        "Computer use and visual design judgment",
+        "Planning, synthesis, and final verification",
+        "Multi-agent coordination"
+      ],
+      "weaknesses": [
+        "High output-token cost",
+        "Potentially excessive latency at high reasoning effort",
+        "Evaluation gaming complicates interpretation of software-engineering benchmarks",
+        "Overkill for extraction, classification, formatting, and routine volume work",
+        "Early post-launch operational evidence"
+      ],
+      "bestFor": [
+        "Repo-scale architecture and implementation",
+        "Planner or verifier roles in high-stakes workflows",
+        "Complex research with tool use",
+        "Computer-use and design-heavy tasks",
+        "Cross-model synthesis",
+        "Final polish on public or client-facing artifacts"
+      ],
+      "avoidFor": [
+        "Cheapest throughput loops",
+        "Simple classification or extraction",
+        "Raw batch scanning before compression",
+        "Latency-critical low-complexity interactions"
+      ],
+      "proUsage": "Use Sol as the planner, synthesizer, or verifier when the task benefits from deep reasoning, tools, design judgment, or cross-model synthesis. Use Terra, Luna, or an open-weight workhorse for bulk execution.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.6-sol",
+        "vendor": "https://openai.com/index/gpt-5-6/",
+        "leaderboard": "https://artificialanalysis.ai/leaderboards/models"
+      },
+      "popularity": null
+    },
+    {
+      "id": "gpt-5-6-terra",
+      "name": "GPT-5.6 Terra",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.6-terra",
+      "tier": "frontier",
+      "status": "new",
+      "oneLiner": "OpenAI's balanced GPT-5.6 tier for strong agentic work at half Sol's token price.",
+      "price": {
+        "inputPerM": 1,
+        "outputPerM": 6,
+        "currency": "USD"
+      },
+      "context": 1050000,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": 63.4
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The balanced GPT-5.6 lane pairs a live-confirmed 1.05M context window with $2.50/$15 pricing; independent post-GA evidence is still early.",
+        "loved": [
+          "Half Sol's token price at $2.50/$15 per M",
+          "1.05M context",
+          "87.4 on OpenAI's Terminal-Bench 2.1 GA chart",
+          "Useful middle lane between Luna throughput and Sol judgment"
+        ],
+        "gripes": [
+          "Limited independent reliability and popularity history",
+          "SWE-bench Pro 63.4 on OpenAI's GA table — well behind Claude's ~80 tier",
+          "Vendor launch benchmarks need workload-specific validation"
+        ]
+      },
+      "strengths": [
+        "Balanced capability and price",
+        "Long-context worker tasks",
+        "Agentic coding and tool use"
+      ],
+      "weaknesses": [
+        "Unverified speed",
+        "Early post-launch operational evidence",
+        "Less capable than Sol on the hardest work"
+      ],
+      "bestFor": [
+        "Worker roles in multi-step orchestration",
+        "Cost-aware agentic coding",
+        "Long-context production workloads"
+      ],
+      "avoidFor": [
+        "Cheapest bulk extraction",
+        "Hardest planner or verifier roles",
+        "Latency-sensitive use until speed is measured"
+      ],
+      "proUsage": "Use Terra as the balanced OpenAI worker for implementation and long-context production, escalating planning, synthesis, and verification to Sol when the judgment gap matters.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.6-terra",
+        "vendor": "https://openai.com/index/gpt-5-6/",
+        "leaderboard": null
+      },
+      "popularity": null
+    },
+    {
+      "id": "gpt-5-6-luna",
+      "name": "GPT-5.6 Luna",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.6-luna",
+      "tier": "fast",
+      "status": "new",
+      "oneLiner": "OpenAI's fast, low-cost GPT-5.6 tier for high-volume drafting, mapping, and routine execution.",
+      "price": {
+        "inputPerM": 0.1,
+        "outputPerM": 0.6,
+        "currency": "USD"
+      },
+      "context": 1050000,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": 62.7
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "positive",
+        "score": 0.75,
+        "summary": "The cheap GPT-5.6 lane combines a live-confirmed 1.05M context window with $1/$6 pricing for volume work; measured output speed and independent post-GA history are not yet available.",
+        "loved": [
+          "$1/$6 per M makes the GPT-5.6 family practical for worker volume",
+          "1.05M context",
+          "84.7 on OpenAI's Terminal-Bench 2.1 GA chart",
+          "Natural fit for mapper and drafter roles"
+        ],
+        "gripes": [
+          "Output throughput has not been independently measured",
+          "Limited independent reliability and popularity history",
+          "SWE-bench Pro 62.7 on OpenAI's GA table — well behind Claude's ~80 tier"
+        ]
+      },
+      "strengths": [
+        "Low-cost high-volume execution",
+        "Long-context mapping and drafting",
+        "Routine tool-assisted work"
+      ],
+      "weaknesses": [
+        "Unverified speed",
+        "Lower capability than Terra or Sol",
+        "Early post-launch operational evidence"
+      ],
+      "bestFor": [
+        "Mapper and drafter roles",
+        "High-volume classification and extraction",
+        "Routine long-context transformations"
+      ],
+      "avoidFor": [
+        "High-stakes final verification",
+        "Hardest architecture and synthesis",
+        "Latency-sensitive use until speed is measured"
+      ],
+      "proUsage": "Use Luna for cheap mapping, drafting, classification, and routine worker calls, then hand judgment-heavy finishing or verification to Terra, Sol, or a vendor-diverse frontier model.",
+      "roster": {
+        "inPlay": true
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/openai/gpt-5.6-luna",
+        "vendor": "https://openai.com/index/gpt-5-6/",
+        "leaderboard": null
+      },
+      "popularity": null
+    },
+    {
       "id": "gemini-3-1-pro",
       "name": "Gemini 3.1 Pro Preview",
       "vendor": "Google",
@@ -870,11 +1534,7 @@
       },
       "context": 1048576,
       "speedTps": 143,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1488,
         "aaIndex": 57,
@@ -945,11 +1605,7 @@
       },
       "context": 1048576,
       "speedTps": 280,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1477,
         "aaIndex": 55,
@@ -1019,10 +1675,7 @@
       },
       "context": 1048576,
       "speedTps": null,
-      "liveFields": [
-        "price",
-        "context"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -1085,11 +1738,7 @@
       },
       "context": 1000000,
       "speedTps": 205,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1446,
         "aaIndex": 53,
@@ -1161,10 +1810,7 @@
       },
       "context": 2000000,
       "speedTps": null,
-      "liveFields": [
-        "price",
-        "context"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1474,
         "aaIndex": null,
@@ -1222,16 +1868,13 @@
       "status": "new",
       "oneLiner": "The #1 model on OpenRouter by token throughput — the cheapest credible agentic brain with 1M context.",
       "price": {
-        "inputPerM": 0.098,
-        "outputPerM": 0.197,
+        "inputPerM": 0.14,
+        "outputPerM": 0.28,
         "currency": "USD"
       },
       "context": 1048576,
       "speedTps": null,
-      "liveFields": [
-        "price",
-        "context"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -1301,11 +1944,7 @@
       },
       "context": 1048576,
       "speedTps": 62,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1470,
         "aaIndex": 52,
@@ -1372,10 +2011,7 @@
       },
       "context": 262144,
       "speedTps": null,
-      "liveFields": [
-        "price",
-        "context"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -1441,13 +2077,9 @@
         "outputPerM": 0.28,
         "currency": "USD"
       },
-      "context": 1048576,
+      "context": 1050000,
       "speedTps": 43,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1466,
         "aaIndex": 54,
@@ -1515,11 +2147,7 @@
       },
       "context": 1048576,
       "speedTps": 45,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1450,
         "aaIndex": 55,
@@ -1583,17 +2211,13 @@
       "status": "stable",
       "oneLiner": "The open-weight darling — 'cheapest Tier-A, no caveats', uniquely stable over very long agentic sessions.",
       "price": {
-        "inputPerM": 0.68,
-        "outputPerM": 3.41,
+        "inputPerM": 0.589,
+        "outputPerM": 2.48,
         "currency": "USD"
       },
       "context": 262144,
       "speedTps": 49,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1461,
         "aaIndex": 54,
@@ -1659,17 +2283,13 @@
       "status": "new",
       "oneLiner": "China's top closed-weight flagship — an agent-first reasoning model matching GPT-5.5 medium at low latency.",
       "price": {
-        "inputPerM": 1.25,
-        "outputPerM": 3.75,
+        "inputPerM": 1.475,
+        "outputPerM": 4.425,
         "currency": "USD"
       },
       "context": 1000000,
       "speedTps": 108,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1474,
         "aaIndex": 57,
@@ -1734,17 +2354,13 @@
       "status": "stable",
       "oneLiner": "Z.ai's open-weight coder; GLM-5.2 is the current 1M-context refresh, live on OpenRouter.",
       "price": {
-        "inputPerM": 0.98,
-        "outputPerM": 3.08,
+        "inputPerM": 0.76,
+        "outputPerM": 2.42,
         "currency": "USD"
       },
-      "context": 202752,
+      "context": 1048576,
       "speedTps": 78,
-      "liveFields": [
-        "price",
-        "context",
-        "speedTps"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": 1475,
         "aaIndex": 51,
@@ -1800,144 +2416,6 @@
       "popularity": 11
     },
     {
-      "id": "llama-5",
-      "name": "Llama 5",
-      "vendor": "Meta",
-      "vendorKey": "llama",
-      "openrouterId": "meta-llama/llama-5",
-      "tier": "open",
-      "status": "stable",
-      "oneLiner": "Meta's frontier-class open-weights model targeting GPT-5/Gemini-3 parity on reasoning, coding and agents.",
-      "price": {
-        "inputPerM": 0.5,
-        "outputPerM": null,
-        "currency": "USD"
-      },
-      "context": null,
-      "speedTps": null,
-      "liveFields": [
-        "price"
-      ],
-      "benchmarks": {
-        "lmarenaElo": null,
-        "aaIndex": null,
-        "aiderPolyglot": null,
-        "sweBench": null
-      },
-      "primaryBench": "aaIndex",
-      "sentiment": {
-        "label": "mixed",
-        "score": 0.5,
-        "summary": "Keeps an open-weight option at the frontier, but practitioner buzz has shifted to Chinese labs — Llama is no longer the open-weight darling.",
-        "loved": [
-          "Frontier-class open weights targeting GPT-5/Gemini-3 parity",
-          "Hosted from ~$0.50/M input",
-          "Western open-weight option"
-        ],
-        "gripes": [
-          "Open-weight mindshare has decisively shifted to Kimi/MiniMax/DeepSeek",
-          "Llama Community License (700M MAU cap) is not fully permissive"
-        ]
-      },
-      "strengths": [
-        "Frontier-class open weights",
-        "Western lab provenance",
-        "Cheap hosting"
-      ],
-      "weaknesses": [
-        "Lost open-weight mindshare to Chinese labs",
-        "Non-fully-permissive license"
-      ],
-      "bestFor": [
-        "Western-governance open-weight deployments",
-        "Self-hosting at the frontier"
-      ],
-      "avoidFor": [
-        "Apps over the 700M MAU license cap",
-        "Teams chasing the cheapest/best open value (Chinese models lead)"
-      ],
-      "proUsage": "Chosen mainly when a Western-lab open-weight model is required for governance; otherwise pros pick Chinese open models.",
-      "roster": {
-        "inPlay": true
-      },
-      "links": {
-        "openrouter": "https://openrouter.ai/meta-llama/llama-5",
-        "vendor": "https://theplanettools.ai/tools/llama-5",
-        "leaderboard": null
-      },
-      "popularity": 22
-    },
-    {
-      "id": "mistral-large-3",
-      "name": "Mistral Large 3",
-      "vendor": "Mistral",
-      "vendorKey": "mistral",
-      "openrouterId": "mistralai/mistral-large-3",
-      "tier": "open",
-      "status": "stable",
-      "oneLiner": "Europe's leading open-weight frontier model — a 675B sparse MoE under Apache 2.0.",
-      "price": {
-        "inputPerM": null,
-        "outputPerM": null,
-        "currency": "USD"
-      },
-      "context": 256000,
-      "speedTps": null,
-      "liveFields": [
-        "context"
-      ],
-      "benchmarks": {
-        "lmarenaElo": null,
-        "aaIndex": null,
-        "aiderPolyglot": null,
-        "sweBench": null
-      },
-      "primaryBench": "aaIndex",
-      "sentiment": {
-        "label": "positive",
-        "score": 0.75,
-        "summary": "Europe's flagship open-weight MoE — the largest fully-permissive (Apache 2.0) model from a major Western lab, with vision.",
-        "loved": [
-          "675B total / 41B active sparse MoE",
-          "Apache 2.0 — fully permissive",
-          "256K context with vision",
-          "Largest open-weight MoE from a major Western lab"
-        ],
-        "gripes": [
-          "Predates the 2026 frontier wave (Dec 2025) and isn't topping current boards",
-          "256K context vs 1M-class peers"
-        ]
-      },
-      "strengths": [
-        "Fully permissive Apache 2.0",
-        "Large MoE with vision",
-        "European/sovereign option"
-      ],
-      "weaknesses": [
-        "Behind the 2026 frontier on capability",
-        "256K context"
-      ],
-      "bestFor": [
-        "Apache-2.0 / sovereign deployments",
-        "Self-hosted multimodal",
-        "European-governance needs"
-      ],
-      "avoidFor": [
-        "Bleeding-edge capability needs",
-        "Very long context"
-      ],
-      "proUsage": "The pick when a truly permissive (Apache 2.0) Western open-weight model is required for sovereign or commercial freedom.",
-      "roster": {
-        "inPlay": true
-      },
-      "links": {
-        "openrouter": "https://openrouter.ai/mistralai/mistral-large-3",
-        "vendor": "https://mistral.ai/news/mistral-3/",
-        "leaderboard": null
-      },
-      "popularity": 21
-    },
-    {
       "id": "nemotron-3-ultra",
       "name": "Nemotron 3 Ultra 550B",
       "vendor": "NVIDIA",
@@ -1947,15 +2425,13 @@
       "status": "new",
       "oneLiner": "NVIDIA's top open Nemotron tier — a 550B MoE under a fully permissive license, powerful but hard to self-host.",
       "price": {
-        "inputPerM": 0.5,
-        "outputPerM": 2.5,
+        "inputPerM": 0.6,
+        "outputPerM": 3.6,
         "currency": "USD"
       },
-      "context": null,
+      "context": 512288,
       "speedTps": null,
-      "liveFields": [
-        "price"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -2074,24 +2550,22 @@
       "popularity": 27
     },
     {
-      "id": "command-a-plus",
-      "name": "Command A+",
-      "vendor": "Cohere",
-      "vendorKey": "cohere",
-      "openrouterId": "cohere/command-a-plus",
-      "tier": "open",
+      "id": "qwen3-8-max",
+      "name": "Qwen3.8 Max",
+      "vendor": "Alibaba",
+      "vendorKey": "qwen",
+      "openrouterId": "qwen/qwen3.8-max",
+      "tier": "frontier",
       "status": "new",
-      "oneLiner": "Cohere's sovereign/enterprise-focused open model — Apache 2.0, multimodal/agentic, with big agentic-benchmark gains.",
+      "oneLiner": "Alibaba's newest closed-weight flagship — successor to Qwen3.7 Max, 1M context, priced a step above it.",
       "price": {
-        "inputPerM": null,
-        "outputPerM": null,
+        "inputPerM": 2.0,
+        "outputPerM": 6.0,
         "currency": "USD"
       },
-      "context": 128000,
+      "context": 1000000,
       "speedTps": null,
-      "liveFields": [
-        "context"
-      ],
+      "liveFields": [],
       "benchmarks": {
         "lmarenaElo": null,
         "aaIndex": null,
@@ -2100,51 +2574,307 @@
       },
       "primaryBench": "aaIndex",
       "sentiment": {
-        "label": "positive",
-        "score": 0.75,
-        "summary": "A sovereign/enterprise-focused open model with strong agentic gains, efficient enough to run on ~2x H100.",
+        "label": "neutral",
+        "score": 0.5,
+        "summary": "Newly listed on OpenRouter — price and context are live-verified, but there is no independent benchmark or community track record in this roster yet.",
         "loved": [
-          "218B sparse MoE (25B active), Apache 2.0",
-          "Multimodal/agentic, 48 languages, 128K context",
-          "Runs on ~2x H100",
-          "Big jumps on tau2-Bench Telecom (85%) and Terminal-Bench Hard (25%)"
+          "1M context on the current Qwen flagship",
+          "Direct successor to the well-reviewed 3.7 Max line"
         ],
         "gripes": [
-          "Not topping general leaderboards",
-          "Narrower enterprise/sovereign positioning",
-          "128K context vs 1M-class peers"
+          "Newly listed — no independent benchmark or community track record in this roster yet",
+          "Roughly 35% dearer per-M than Qwen3.7 Max, so the uplift needs proving on your own work"
         ]
       },
       "strengths": [
-        "Efficient (2x H100)",
-        "Apache 2.0",
-        "Multilingual (48 languages)",
-        "Enterprise/agentic tuning"
+        "Newest Qwen flagship",
+        "1M context",
+        "Agent-first lineage from 3.7 Max"
       ],
       "weaknesses": [
-        "Not a general-purpose leader",
-        "128K context",
-        "Niche positioning"
+        "Unbenchmarked here",
+        "Costlier than 3.7 Max",
+        "API-only flagship"
       ],
       "bestFor": [
-        "Sovereign/enterprise deployments",
-        "Multilingual agentic tasks",
-        "On-prem with modest GPUs"
+        "Trying the current Qwen top-end",
+        "Long-context agentic runs"
       ],
       "avoidFor": [
-        "General consumer chat",
-        "Very long context"
+        "Cost-sensitive bulk work",
+        "Anything needing a proven benchmark record"
       ],
-      "proUsage": "Chosen by enterprises needing a permissive, multilingual, efficiently-hostable agentic model for sovereign deployments.",
+      "proUsage": "Too new to have a settled pro reputation. Worth an A/B against Qwen3.7 Max on your own tasks before promoting it.",
       "roster": {
-        "inPlay": true
+        "inPlay": false
       },
       "links": {
-        "openrouter": "https://openrouter.ai/cohere/command-a-plus",
-        "vendor": "https://cohere.com/blog/command-a-plus",
+        "openrouter": "https://openrouter.ai/qwen/qwen3.8-max",
+        "vendor": "https://openrouter.ai/qwen/qwen3.8-max",
         "leaderboard": null
       },
-      "popularity": 24
+      "popularity": 6
+    },
+    {
+      "id": "qwen3-7-flash",
+      "name": "Qwen3.7 Flash",
+      "vendor": "Alibaba",
+      "vendorKey": "qwen",
+      "openrouterId": "qwen/qwen3.7-flash",
+      "tier": "fast",
+      "status": "new",
+      "oneLiner": "1M-context Qwen at roughly $0.03/$0.13 per M — one of the cheapest million-token models on OpenRouter.",
+      "price": {
+        "inputPerM": 0.03,
+        "outputPerM": 0.13,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "neutral",
+        "score": 0.5,
+        "summary": "Newly listed on OpenRouter — price and context are live-verified, but there is no independent benchmark or community track record in this roster yet.",
+        "loved": [
+          "1M context at a near-throwaway price",
+          "Fits bulk/loop work that frontier pricing makes uneconomic"
+        ],
+        "gripes": [
+          "Speed-tier model — not for hard reasoning",
+          "Newly listed, unbenchmarked in this roster"
+        ]
+      },
+      "strengths": [
+        "Exceptional price per token",
+        "1M context",
+        "Good fit for high-volume passes"
+      ],
+      "weaknesses": [
+        "Weaker reasoning than plus/max tiers",
+        "No benchmark record here yet"
+      ],
+      "bestFor": [
+        "Bulk summarisation and extraction",
+        "Cheap first-pass over long context",
+        "Loop/fan-out work"
+      ],
+      "avoidFor": [
+        "Hard reasoning",
+        "Agentic tool-use where a mistake is expensive"
+      ],
+      "proUsage": "The obvious cheap lane for high-volume passes where a frontier model is overkill.",
+      "roster": {
+        "inPlay": false
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/qwen/qwen3.7-flash",
+        "vendor": "https://openrouter.ai/qwen/qwen3.7-flash",
+        "leaderboard": null
+      },
+      "popularity": 7
+    },
+    {
+      "id": "qwen3-7-plus",
+      "name": "Qwen3.7 Plus",
+      "vendor": "Alibaba",
+      "vendorKey": "qwen",
+      "openrouterId": "qwen/qwen3.7-plus",
+      "tier": "open",
+      "status": "new",
+      "oneLiner": "The mid rung of the Qwen3.7 line — 1M context at roughly a quarter of Max's price.",
+      "price": {
+        "inputPerM": 0.32,
+        "outputPerM": 1.28,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "neutral",
+        "score": 0.5,
+        "summary": "Newly listed on OpenRouter — price and context are live-verified, but there is no independent benchmark or community track record in this roster yet.",
+        "loved": [
+          "1M context without flagship pricing",
+          "Sits between Flash and Max for everyday work"
+        ],
+        "gripes": [
+          "Newly listed, unbenchmarked here",
+          "Mid-tier ceiling on the hardest reasoning"
+        ]
+      },
+      "strengths": [
+        "Balanced price/capability",
+        "1M context",
+        "Same 3.7 generation as Max"
+      ],
+      "weaknesses": [
+        "Not a frontier ceiling",
+        "No benchmark record here yet"
+      ],
+      "bestFor": [
+        "Everyday long-context work",
+        "Cost-aware agentic runs"
+      ],
+      "avoidFor": [
+        "Frontier-hard reasoning",
+        "Latency-critical bulk work (use Flash)"
+      ],
+      "proUsage": "The sensible default rung of the Qwen3.7 line when Max is overkill and Flash is too light.",
+      "roster": {
+        "inPlay": false
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/qwen/qwen3.7-plus",
+        "vendor": "https://openrouter.ai/qwen/qwen3.7-plus",
+        "leaderboard": null
+      },
+      "popularity": 6
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "name": "Qwen3 Coder Plus",
+      "vendor": "Alibaba",
+      "vendorKey": "qwen",
+      "openrouterId": "qwen/qwen3-coder-plus",
+      "tier": "specialist",
+      "status": "new",
+      "oneLiner": "Qwen's coding-specialist line at 1M context — built for repo-scale code work rather than general chat.",
+      "price": {
+        "inputPerM": 0.65,
+        "outputPerM": 3.25,
+        "currency": "USD"
+      },
+      "context": 1000000,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "neutral",
+        "score": 0.5,
+        "summary": "Newly listed on OpenRouter — price and context are live-verified, but there is no independent benchmark or community track record in this roster yet.",
+        "loved": [
+          "1M context suits whole-repo reasoning",
+          "Coding-tuned rather than general-purpose"
+        ],
+        "gripes": [
+          "Priced near the general flagship, so the specialisation has to earn it",
+          "Newly listed, unbenchmarked in this roster"
+        ]
+      },
+      "strengths": [
+        "Code-specialised",
+        "1M context",
+        "Repo-scale reasoning"
+      ],
+      "weaknesses": [
+        "Narrow specialism",
+        "No benchmark record here yet",
+        "Not cheap for a non-frontier tier"
+      ],
+      "bestFor": [
+        "Repo-scale code understanding",
+        "Long-file refactors"
+      ],
+      "avoidFor": [
+        "General chat",
+        "Cost-sensitive bulk work"
+      ],
+      "proUsage": "Worth trying against Claude/GPT coders on genuinely large repos where the 1M window is the differentiator.",
+      "roster": {
+        "inPlay": false
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/qwen/qwen3-coder-plus",
+        "vendor": "https://openrouter.ai/qwen/qwen3-coder-plus",
+        "leaderboard": null
+      },
+      "popularity": 6
+    },
+    {
+      "id": "deepseek-v4-flash-0731",
+      "name": "DeepSeek V4 Flash (0731)",
+      "vendor": "DeepSeek",
+      "vendorKey": "deepseek",
+      "openrouterId": "deepseek/deepseek-v4-flash-0731",
+      "tier": "fast",
+      "status": "new",
+      "oneLiner": "Pinned 0731 snapshot of DeepSeek V4 Flash — same 1M context, listed at roughly a third less than the rolling tag.",
+      "price": {
+        "inputPerM": 0.09,
+        "outputPerM": 0.18,
+        "currency": "USD"
+      },
+      "context": 1048576,
+      "speedTps": null,
+      "liveFields": [],
+      "benchmarks": {
+        "lmarenaElo": null,
+        "aaIndex": null,
+        "aiderPolyglot": null,
+        "sweBench": null
+      },
+      "primaryBench": "aaIndex",
+      "sentiment": {
+        "label": "neutral",
+        "score": 0.5,
+        "summary": "Newly listed on OpenRouter — price and context are live-verified, but there is no independent benchmark or community track record in this roster yet.",
+        "loved": [
+          "Cheaper than the rolling deepseek-v4-flash tag",
+          "Pinned snapshot, so behaviour won't shift under you",
+          "1M context"
+        ],
+        "gripes": [
+          "A pin, not a new capability tier",
+          "Snapshots eventually get retired"
+        ]
+      },
+      "strengths": [
+        "Cheapest 1M-context option in the DeepSeek line",
+        "Reproducible — pinned build"
+      ],
+      "weaknesses": [
+        "No capability gain over V4 Flash",
+        "Snapshot lifespan is not guaranteed"
+      ],
+      "bestFor": [
+        "Cost-optimised bulk work",
+        "Anything needing reproducible model behaviour"
+      ],
+      "avoidFor": [
+        "Long-lived configs that shouldn't chase snapshot ids"
+      ],
+      "proUsage": "Pin this instead of the rolling tag when you want DeepSeek Flash pricing locked and behaviour stable.",
+      "roster": {
+        "inPlay": false
+      },
+      "links": {
+        "openrouter": "https://openrouter.ai/deepseek/deepseek-v4-flash-0731",
+        "vendor": "https://openrouter.ai/deepseek/deepseek-v4-flash-0731",
+        "leaderboard": null
+      },
+      "popularity": 6
     }
   ],
   "upAndComing": [
@@ -2177,6 +2907,60 @@
       "expected": "Available now",
       "why": "#1 in the OpenRouter Programming category — a cheap multimodal open model owning coding-token volume at top value-per-dollar.",
       "link": "https://openrouter.ai/xiaomi/mimo-v2.5"
+    },
+    {
+      "id": "kimi-k3",
+      "name": "Kimi K3",
+      "vendor": "Moonshot AI",
+      "vendorKey": "moonshot",
+      "openrouterId": "moonshotai/kimi-k3",
+      "expected": "Available now",
+      "why": "#1 on Arena's Frontend Code leaderboard (1679 Elo, ahead of Fable 5) and #1 on Design Arena's Frontend Web App board (1326 Elo). Open-weight, 1M context, $3/$15 per MTok (live OpenRouter). Weakest at gaming (#2 behind Fable 5).",
+      "link": "https://openrouter.ai/moonshotai/kimi-k3",
+      "tier": "frontier",
+      "frontendArena": {
+        "arenaFrontendElo": 1679,
+        "arenaFrontendRank": 1,
+        "designArenaFrontendElo": 1326,
+        "designArenaFrontendRank": 1,
+        "source": "Arena.ai + DesignArena, Jul 2026"
+      },
+      "context": 1048576,
+      "price": {
+        "inputPerM": 3,
+        "outputPerM": 15,
+        "currency": "USD"
+      }
+    },
+    {
+      "id": "grok-4.5",
+      "name": "Grok 4.5",
+      "vendor": "xAI",
+      "vendorKey": "xai",
+      "openrouterId": "x-ai/grok-4.5",
+      "expected": "Available now",
+      "why": "500K context · $2/$6 per M tokens (live OpenRouter pricing). Not yet reviewed — benchmarks and verdict pending.",
+      "link": "https://openrouter.ai/x-ai/grok-4.5"
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "vendor": "Google",
+      "vendorKey": "gemini",
+      "openrouterId": "google/gemini-3.6-flash",
+      "expected": "Available now",
+      "why": "1M context · $1.5/$7.5 per M tokens (live OpenRouter pricing). Not yet reviewed — benchmarks and verdict pending.",
+      "link": "https://openrouter.ai/google/gemini-3.6-flash"
+    },
+    {
+      "id": "gpt-5.6-sol-pro",
+      "name": "GPT-5.6 Sol Pro",
+      "vendor": "OpenAI",
+      "vendorKey": "openai",
+      "openrouterId": "openai/gpt-5.6-sol-pro",
+      "expected": "Available now",
+      "why": "1M context · $5/$30 per M tokens (live OpenRouter pricing). Not yet reviewed — benchmarks and verdict pending.",
+      "link": "https://openrouter.ai/openai/gpt-5.6-sol-pro"
     }
   ],
   "sources": [
@@ -2245,10 +3029,6 @@
       "url": "https://openai.com/index/introducing-gpt-5-5/"
     },
     {
-      "name": "TechCrunch — GPT-5.5 Instant becomes ChatGPT default",
-      "url": "https://techcrunch.com/2026/05/05/openai-releases-gpt-5-5-instant-a-new-default-model-for-chatgpt/"
-    },
-    {
       "name": "Google — Gemini 3.5 models",
       "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-5/"
     },
@@ -2281,10 +3061,6 @@
       "url": "https://venturebeat.com/technology/goodbye-llama-meta-launches-new-proprietary-ai-model-muse-spark-first-since"
     },
     {
-      "name": "Llama 5 overview",
-      "url": "https://theplanettools.ai/tools/llama-5"
-    },
-    {
       "name": "Mistral — Mistral 3 / Large 3",
       "url": "https://mistral.ai/news/mistral-3/"
     },
@@ -2307,10 +3083,6 @@
     {
       "name": "NVIDIA — Nemotron 3 family",
       "url": "https://nvidianews.nvidia.com/news/nvidia-debuts-nemotron-3-family-of-open-models"
-    },
-    {
-      "name": "Cohere — Command A+",
-      "url": "https://cohere.com/blog/command-a-plus"
     },
     {
       "name": "AWS — Amazon Nova 2 what's new",
@@ -2347,6 +3119,18 @@
     {
       "name": "Artificial Analysis — Gemini 3.5 Flash everything you need to know",
       "url": "https://artificialanalysis.ai/articles/gemini-3-5-flash-everything-you-need-to-know"
+    },
+    {
+      "name": "OpenAI — GPT-5.6",
+      "url": "https://openai.com/index/gpt-5-6/"
+    },
+    {
+      "name": "Simon Willison — GPT-5.6",
+      "url": "https://simonwillison.net/2026/Jul/9/gpt-5-6/"
+    },
+    {
+      "name": "TechTimes — GPT-5.6 Sol review and METR coverage",
+      "url": "https://www.techtimes.com/articles/319808/20260707/gpt-56-sol-review-faster-coding-half-fable-5-cost-benchmark-problem.htm"
     }
   ]
 }

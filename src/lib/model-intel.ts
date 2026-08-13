@@ -73,6 +73,89 @@ export interface Upcoming {
   link: string;
 }
 
+// ── Orchestration (multi-model playbook) ────────────────────────────────────────────────
+// Additive layer over routing{}: named execution patterns (DAG topologies), task-shape rules
+// that map work onto them, and concrete recipes binding roles → candidate model ids. Optional
+// on the doc so pre-orchestration snapshots (and EMPTY) stay valid; agents that can only make
+// one call keep consuming routing{} untouched.
+
+export type ChoosePolicy = "first-eligible" | "cheapest-eligible" | "best-fit" | "diverse-eligible";
+
+export interface PatternStage {
+  id: string;
+  role: string;
+  dependsOn: string[];
+  fanOut: number;
+  input: string;
+  output: string;
+}
+
+export interface OrchestrationPattern {
+  id: string;
+  label: string;
+  description: string;
+  stages: PatternStage[];
+  finalStageId: string;
+}
+
+export interface TaskShapeMatch {
+  artifacts?: string[];
+  complexity?: string[];
+  risk?: string[];
+  volume?: string[];
+  latency?: string[];
+  parallelizable?: boolean;
+}
+
+export interface TaskShapeRule {
+  id: string;
+  priority: number;
+  match: TaskShapeMatch;
+  signals: string[];
+  recipeId: string;
+}
+
+export interface RecipeRole {
+  id: string;
+  candidates: string[]; // model ids, in preference order
+  choose: ChoosePolicy;
+  effort: string;
+  maxCalls: number;
+  preferDifferentVendorFrom: string[]; // role ids whose resolved vendor(s) this role should differ from
+}
+
+export interface RecipeControls {
+  maxParallel: number;
+  maxRounds: number;
+  budgetClass: "low" | "medium" | "high";
+  onFailure: string;
+  onDisagreement: string;
+}
+
+export interface OrchestrationRecipe {
+  id: string;
+  label: string;
+  patternId: string;
+  roles: RecipeRole[];
+  controls: RecipeControls;
+}
+
+export interface OrchestrationEligibility {
+  requireRosterInPlay: boolean;
+  excludeStatuses: ModelStatus[];
+  missingModelPolicy: string;
+  incompleteRecipePolicy: string;
+}
+
+export interface Orchestration {
+  version: number;
+  defaultRecipeId: string;
+  eligibility: OrchestrationEligibility;
+  patterns: OrchestrationPattern[];
+  taskShapeRules: TaskShapeRule[];
+  recipes: OrchestrationRecipe[];
+}
+
 export interface ModelIntelDoc {
   $schema: string;
   generatedAt: string;
@@ -87,6 +170,7 @@ export interface ModelIntelDoc {
     snapshot: { curatedAsOf: string; by: string; curatedFields: string[] };
   };
   routing: { default: string; rules: string[] };
+  orchestration?: Orchestration;
   leaderboards: { label: string; url: string }[];
   picks: Pick[];
   models: ModelIntel[];
@@ -583,6 +667,188 @@ export function recommendModel(
   return { model: top.model, why };
 }
 
+// ── Orchestration resolver (React-free; same determinism contract as recommendModel) ─────
+
+export interface ResolvedRole {
+  role: RecipeRole;
+  models: ModelIntel[]; // ≥1 when resolved; "diverse-eligible" resolves up to role.maxCalls
+  why: string;
+}
+
+export interface OrchestrationPlan {
+  recipe: OrchestrationRecipe;
+  pattern: OrchestrationPattern | null;
+  roles: ResolvedRole[];
+  complete: boolean;
+  why: string;
+}
+
+/**
+ * Binds one recipe's roles to concrete in-roster models. Deterministic: score/price ordering
+ * uses stable sorts, so equal-scoring candidates keep their candidates[] order. Vendor
+ * diversity (preferDifferentVendorFrom) is a soft
+ * preference — applied only when a differing-vendor candidate exists, per
+ * eligibility.missingModelPolicy="next-candidate". Returns null only when the recipe id is
+ * unknown or the doc has no orchestration block; an unfillable role yields complete:false so
+ * callers can apply incompleteRecipePolicy.
+ */
+export function resolveRecipe(
+  doc: ModelIntelDoc,
+  recipeId: string,
+  rosterIds: string[],
+): OrchestrationPlan | null {
+  const orch = doc.orchestration;
+  if (!orch) return null;
+  const recipe = orch.recipes.find((r) => r.id === recipeId);
+  if (!recipe) return null;
+  const pattern = orch.patterns.find((p) => p.id === recipe.patternId) ?? null;
+
+  const excluded = new Set<ModelStatus>(orch.eligibility.excludeStatuses ?? []);
+  const eligible = applyRoster(doc, rosterIds).filter(
+    (m) => (!orch.eligibility.requireRosterInPlay || m.roster.inPlay) && !excluded.has(m.status),
+  );
+  const byId = new Map(eligible.map((m) => [m.id, m]));
+
+  const resolvedByRoleId = new Map<string, ModelIntel[]>();
+  const roles: ResolvedRole[] = recipe.roles.map((role) => {
+    let pool = role.candidates.map((id) => byId.get(id)).filter((m): m is ModelIntel => m != null);
+
+    // Soft vendor-diversity: drop vendors already used by the referenced roles, but only when
+    // that still leaves a candidate (availability beats diversity).
+    const avoid = new Set<string>();
+    for (const otherId of role.preferDifferentVendorFrom ?? []) {
+      for (const m of resolvedByRoleId.get(otherId) ?? []) avoid.add(m.vendorKey);
+    }
+    let diversified = false;
+    if (avoid.size > 0) {
+      const diverse = pool.filter((m) => !avoid.has(m.vendorKey));
+      if (diverse.length > 0) {
+        pool = diverse;
+        diversified = true;
+      }
+    }
+
+    let models: ModelIntel[] = [];
+    switch (role.choose) {
+      case "cheapest-eligible":
+        // Stable sort: equal blended price preserves candidate order (the documented tiebreak).
+        models = pool
+          .slice()
+          .sort(
+            (a, b) =>
+              (blendedPrice(a.price) ?? Number.POSITIVE_INFINITY) -
+              (blendedPrice(b.price) ?? Number.POSITIVE_INFINITY),
+          )
+          .slice(0, 1);
+        break;
+      case "best-fit":
+        // Highest intelligence among the (possibly diversified) pool; candidate order breaks ties.
+        models = pool
+          .slice()
+          .sort((a, b) => (b.benchmarks.aaIndex ?? -1) - (a.benchmarks.aaIndex ?? -1))
+          .slice(0, 1);
+        break;
+      case "diverse-eligible": {
+        const seen = new Set<string>();
+        for (const m of pool) {
+          if (seen.has(m.vendorKey)) continue;
+          seen.add(m.vendorKey);
+          models.push(m);
+          if (models.length >= Math.max(1, role.maxCalls)) break;
+        }
+        break;
+      }
+      default: // "first-eligible"
+        models = pool.slice(0, 1);
+    }
+
+    resolvedByRoleId.set(role.id, models);
+    const why =
+      models.length === 0
+        ? `no eligible candidate for "${role.id}" (roster/status filtered all of: ${role.candidates.join(", ")})`
+        : `${role.choose}${diversified ? " · vendor-diverse" : ""} → ${models.map((m) => m.name).join(" + ")}`;
+    return { role, models, why };
+  });
+
+  const complete = roles.every((r) => r.models.length > 0);
+  const why = complete
+    ? `${recipe.label}: ${roles.map((r) => `${r.role.id}=${r.models.map((m) => m.name).join("+")}`).join(", ")}.`
+    : `${recipe.label} could not fully resolve — ${roles
+        .filter((r) => r.models.length === 0)
+        .map((r) => r.role.id)
+        .join(", ")} unfilled; fall back per eligibility.incompleteRecipePolicy.`;
+
+  return { recipe, pattern, roles, complete, why };
+}
+
+export interface TaskShapeQuery {
+  artifacts?: string[];
+  complexity?: string;
+  risk?: string;
+  volume?: string;
+  latency?: string;
+  parallelizable?: boolean;
+  text?: string; // free-text; matched against rule.signals substrings
+}
+
+/** True when every dimension the rule constrains is satisfied by the query (strict), with
+ *  free-text signal hits accepted as an independent path in. */
+function matchesTaskShape(rule: TaskShapeRule, q: TaskShapeQuery): boolean {
+  const text = (q.text ?? "").toLowerCase();
+  if (text && rule.signals.some((s) => text.includes(s.toLowerCase()))) return true;
+
+  const m = rule.match;
+  const dims: [string[] | undefined, string[] | undefined][] = [
+    [m.artifacts, q.artifacts],
+    [m.complexity, q.complexity ? [q.complexity] : undefined],
+    [m.risk, q.risk ? [q.risk] : undefined],
+    [m.volume, q.volume ? [q.volume] : undefined],
+    [m.latency, q.latency ? [q.latency] : undefined],
+  ];
+  let constrained = 0;
+  for (const [ruleVals, qVals] of dims) {
+    if (!ruleVals || ruleVals.length === 0) continue;
+    constrained += 1;
+    if (!qVals || !qVals.some((v) => ruleVals.includes(v))) return false;
+  }
+  if (m.parallelizable != null) {
+    constrained += 1;
+    if (q.parallelizable !== m.parallelizable) return false;
+  }
+  return constrained > 0; // a rule with no constraints never matches everything by accident
+}
+
+/**
+ * The multi-call sibling of recommendModel(): task shape → highest-priority matching rule →
+ * resolved recipe. The FIRST matching rule owns the decision — lower-priority rules are never
+ * tried (a different task shape is not a fallback for this one). When that recipe can't fully
+ * resolve, eligibility.incompleteRecipePolicy decides: "routing-default" → return null so the
+ * caller drops to recommendModel()/routing.default; anything else → try
+ * orchestration.defaultRecipeId. No matching rule at all → defaultRecipeId. Returns null when
+ * the doc has no orchestration block or nothing resolves.
+ */
+export function recommendOrchestration(
+  doc: ModelIntelDoc,
+  q: TaskShapeQuery,
+  rosterIds: string[],
+): OrchestrationPlan | null {
+  const orch = doc.orchestration;
+  if (!orch) return null;
+
+  const rules = orch.taskShapeRules
+    .slice()
+    .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
+
+  const matched = rules.find((rule) => matchesTaskShape(rule, q));
+  if (matched) {
+    const plan = resolveRecipe(doc, matched.recipeId, rosterIds);
+    if (plan?.complete) return plan;
+    if (orch.eligibility.incompleteRecipePolicy === "routing-default") return null;
+  }
+  const fallback = resolveRecipe(doc, orch.defaultRecipeId, rosterIds);
+  return fallback?.complete ? fallback : null;
+}
+
 // ── Copy-JSON helper ────────────────────────────────────────────────────────────────────
 
 /** what Copy-JSON copies by default — the doc scoped to the user's roster (empty roster ⇒ full doc) */
@@ -590,12 +856,62 @@ export function rosterSubset(doc: ModelIntelDoc, rosterIds: string[]): ModelInte
   const models = applyRoster(doc, rosterIds);
   if (models.length === doc.models.length) return { ...doc };
   const keep = new Set(models.map((m) => m.id));
-  return {
+
+  // Scope orchestration too: drop candidates outside the subset, then recipes left with an
+  // unfillable role, then task-shape rules pointing at dropped recipes — so the copied JSON
+  // never routes an agent to a model it can't see. If defaultRecipeId got dropped, repoint it
+  // at the first surviving recipe; if none survive, drop the block entirely.
+  let orchestration = doc.orchestration;
+  if (orchestration) {
+    const recipes = orchestration.recipes
+      .map((r) => ({
+        ...r,
+        roles: r.roles.map((role) => ({
+          ...role,
+          candidates: role.candidates.filter((id) => keep.has(id)),
+        })),
+      }))
+      .filter((r) => r.roles.every((role) => role.candidates.length > 0));
+    const recipeIds = new Set(recipes.map((r) => r.id));
+    if (recipes.length === 0) {
+      orchestration = undefined;
+    } else {
+      orchestration = {
+        ...orchestration,
+        recipes,
+        defaultRecipeId: recipeIds.has(orchestration.defaultRecipeId)
+          ? orchestration.defaultRecipeId
+          : recipes[0].id,
+        taskShapeRules: orchestration.taskShapeRules.filter((t) => recipeIds.has(t.recipeId)),
+      };
+    }
+  }
+
+  const out: ModelIntelDoc = {
     ...doc,
     models,
-    // Trim picks that point at models no longer in the subset so the copied JSON stays self-consistent.
+    // Both fallback routes must stay inside the subset: routing.default repoints to the first
+    // kept model when the curated default was scoped out.
+    routing: keep.has(doc.routing.default)
+      ? doc.routing
+      : { ...doc.routing, default: models[0]?.id ?? "" },
+    // Trim picks/upAndComing that point at models no longer in the subset.
     picks: doc.picks.filter((p) => keep.has(p.modelId)),
+    upAndComing: doc.upAndComing.filter((u) => keep.has(u.id)),
   };
+  if (orchestration) out.orchestration = orchestration;
+  else delete out.orchestration;
+
+  // curatedPicks isn't on the interface (human-readable extra carried through the ...doc spread
+  // at runtime) — scope it the same way so the copied JSON never names an absent model.
+  const extras = out as unknown as Record<string, unknown>;
+  const curated = extras.curatedPicks as Record<string, { id: string }> | undefined;
+  if (curated && typeof curated === "object") {
+    extras.curatedPicks = Object.fromEntries(
+      Object.entries(curated).filter(([, v]) => v && keep.has(v.id)),
+    );
+  }
+  return out;
 }
 
 // ── Small formatters (React-free) ────────────────────────────────────────────────────────

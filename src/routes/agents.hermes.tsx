@@ -30,6 +30,8 @@ import {
 } from "lucide-react";
 import { IntelligencePortal, type ActivityEvent, type AppKey } from "@/components/intelligence-portal";
 import modelIntel from "@/data/model-intel.json";
+import { ctxFromTable } from "@/lib/ctx-window";
+import { tokenizeCode, type CodeToken } from "@/lib/code-highlight";
 import { ModelLogo } from "@/components/model-logos";
 // Ministry of Experts — hero art (Nous/Hermes, from their site) + bundled
 // lobehub static-SVG vendor logos (offline-safe, every model vendor covered).
@@ -2285,39 +2287,12 @@ function estChatTokens(messages: ChatMessage[], draft: string): number {
 }
 
 // Context window for the active model. The configured default carries its real
-// context_length from config.yaml; otherwise fall back to family heuristics
-// (2026 windows). Always treated as an estimate in the UI.
-// Per-model context windows, verified against the live OpenRouter catalog
-// (2026-06). Order matters — first match wins, so put specific ids before
-// family fallbacks (e.g. glm-5.2 = 1M but glm-5.1/4.x = ~203K).
-const CTX_TABLE: Array<[RegExp, number]> = [
-  [/glm-5\.2/, 1_048_576],
-  [/glm-(5\.1|5v|5-turbo|5\b|4\.7|4\.6|4\.5)/, 202_752],
-  [/haiku/, 200_000],
-  [/fable|opus|sonnet|claude/, 1_000_000],
-  [/gpt-5\.5|gpt-chat/, 1_050_000],
-  [/gpt-5|gpt-4\.1|o[34]\b/, 400_000],
-  [/gemini/, 1_048_576],
-  [/grok-4\.20/, 2_000_000],
-  [/grok-4/, 1_000_000],
-  [/deepseek-v4/, 1_048_576],
-  [/deepseek/, 131_072],
-  [/minimax-m3/, 1_048_576],
-  [/minimax/, 204_800],
-  [/qwen3\.7|qwen3\.5|qwen3-max/, 1_000_000],
-  [/kimi|moonshot/, 262_144],
-  [/llama-4/, 1_048_576],
-  [/llama-3|llama3/, 131_072],
-  [/nemotron/, 1_000_000],
-  [/mistral|command|devstral/, 262_144],
-  [/fugu|sakana/, 1_000_000],
-];
+// context_length from config.yaml; otherwise fall back to the shared per-model
+// table in @/lib/ctx-window (one table for the whole OS — the home command bar
+// resolves windows from the same rules). Always an estimate in the UI.
 function modelCtxLimit(pick: ChatModelPick | null): number {
   if (pick?.context && pick.context > 0) return pick.context;
-  const n = (pick?.name ?? "").toLowerCase();
-  if (!n) return 200_000;
-  for (const [re, ctx] of CTX_TABLE) if (re.test(n)) return ctx;
-  return 200_000;
+  return ctxFromTable(pick?.name ?? "") ?? 200_000;
 }
 
 // Hermes occasionally prints benign stderr-style notices to stdout (e.g.
@@ -2613,17 +2588,38 @@ function ComposerModelSelector({
       (m) => !ql || m.name.toLowerCase().includes(ql) || "mixture of agents moa blend".includes(ql),
     );
   const cfgSet = new Set((data?.configured ?? []).map((s) => s.toLowerCase()));
+  // Show every provider in the catalog, but tag each with whether the user
+  // actually has credentials for it. Configured groups behave as before;
+  // unconfigured groups render dimmed with a "SET UP" badge so users can see
+  // the option exists and get a hint on how to enable it — instead of silently
+  // vanishing, which was the previous behaviour that confused Chris.
   const groups = (data?.catalog ?? [])
-    // Hide providers the user has no credentials for (empty set → show all),
-    // so a pick can't fail with "Unknown provider".
-    .filter((g) => cfgSet.size === 0 || cfgSet.has(g.provider.toLowerCase()))
     .map((g) => ({
       provider: g.provider,
+      configured: cfgSet.size === 0 || cfgSet.has(g.provider.toLowerCase()),
       models: g.models.filter(
         (m) => !ql || m.name.toLowerCase().includes(ql) || g.provider.toLowerCase().includes(ql),
       ),
     }))
     .filter((g) => g.models.length > 0);
+  // Setup instructions per provider — shown when the user tries to pick a
+  // model whose provider isn't configured. Keeps the fix path in the UI
+  // instead of hidden in a config file.
+  const setupHint = (provider: string): string => {
+    const p = provider.toLowerCase();
+    if (p === "openrouter") return "Add OPENROUTER_API_KEY to ~/.hermes/.env, then restart Hermes.";
+    if (p === "anthropic") return "Run `claude setup-token` OR add ANTHROPIC_API_KEY to ~/.hermes/.env.";
+    if (p === "openai") return "Add OPENAI_API_KEY to ~/.hermes/.env OR run `hermes login openai`.";
+    if (p === "xai") return "Run `hermes login xai` OR add XAI_API_KEY to ~/.hermes/.env.";
+    if (p === "google" || p === "gemini") return "Add GOOGLE_API_KEY (or GEMINI_API_KEY) to ~/.hermes/.env.";
+    if (p === "moonshot" || p === "moonshotai") return "Add MOONSHOT_API_KEY, or use OpenRouter (Kimi routes through it).";
+    if (p === "deepseek") return "Add DEEPSEEK_API_KEY to ~/.hermes/.env, or route via OpenRouter.";
+    if (p === "mistral") return "Add MISTRAL_API_KEY to ~/.hermes/.env.";
+    if (p === "groq") return "Add GROQ_API_KEY to ~/.hermes/.env.";
+    if (p === "cohere") return "Add COHERE_API_KEY to ~/.hermes/.env.";
+    if (p === "ollama") return "Install + start Ollama locally (default port 11434).";
+    return `Add credentials for "${provider}" in ~/.hermes/.env or via \`hermes login\`.`;
+  };
   const activeName = active ? shortModelName(active.name) : "default";
   const defName = data?.default?.name;
 
@@ -2740,27 +2736,69 @@ function ComposerModelSelector({
                     fontSize: 9,
                     letterSpacing: "0.14em",
                     textTransform: "uppercase",
-                    color: "rgba(255,230,203,0.5)",
+                    color: g.configured ? "rgba(255,230,203,0.5)" : "rgba(255,230,203,0.32)",
                     padding: "4px 6px",
                   }}
                 >
-                  <span style={{ width: 6, height: 6, borderRadius: 999, background: providerTint(g.provider) }} />
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 999,
+                      background: providerTint(g.provider),
+                      opacity: g.configured ? 1 : 0.4,
+                    }}
+                  />
                   {providerLabel(g.provider)}
+                  {!g.configured && (
+                    <span
+                      title={setupHint(g.provider)}
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: 8,
+                        letterSpacing: "0.1em",
+                        color: "#f0abfc",
+                        border: "1px solid rgba(240,171,252,0.35)",
+                        borderRadius: 4,
+                        padding: "1px 4px",
+                      }}
+                    >
+                      SET UP →
+                    </span>
+                  )}
                 </div>
                 {g.models.map((m) => {
                   const isActive =
                     !active?.mixture && active?.name === m.name && active?.provider === g.provider;
                   const isDefault = defName === m.name;
+                  const reachable = g.configured;
                   return (
                     <button
                       key={`${g.provider}-${m.name}`}
                       type="button"
+                      title={reachable ? undefined : setupHint(g.provider)}
                       onClick={() => {
+                        if (!reachable) {
+                          // Don't let the user pick a model whose provider
+                          // isn't configured — Hermes would silently fall
+                          // back to config.yaml's default and the reply
+                          // would come from the wrong model. Surface the
+                          // exact fix instead (Chris Black on Skool, V3.0).
+                          alert(
+                            `${providerLabel(g.provider)} isn't set up yet.\n\n${setupHint(g.provider)}\n\nWithout this, Hermes silently falls back to whatever your ~/.hermes/config.yaml default is — the reply won't come from the model you picked.`,
+                          );
+                          return;
+                        }
                         onPick({ provider: g.provider, name: m.name });
                         setOpen(false);
                       }}
                       className="w-full text-left flex items-center gap-2 px-2 py-1.5"
-                      style={{ borderRadius: 6, background: isActive ? "rgba(95,208,197,0.12)" : "transparent" }}
+                      style={{
+                        borderRadius: 6,
+                        background: isActive ? "rgba(95,208,197,0.12)" : "transparent",
+                        opacity: reachable ? 1 : 0.5,
+                        cursor: reachable ? "pointer" : "help",
+                      }}
                       onMouseEnter={(e) =>
                         (e.currentTarget.style.background = isActive ? "rgba(95,208,197,0.12)" : "rgba(255,230,203,0.06)")
                       }
@@ -3273,6 +3311,10 @@ function HermesChatActive({
   const [intelEvents, setIntelEvents] = useState<ActivityEvent[]>([]);
   const voiceHermesSession = useRef<string>("");  // Hermes's real session id, captured from turn 1 → resumed for native continuity
   const [chatPhase, setChatPhase] = useState<"thinking" | "responding">("thinking");
+  // Live activity feed — the running "what Hermes is doing right now" ticker
+  // (Browsing…, Reading…, Writing…), built from the agent's real stderr
+  // status lines. Same experience the Telegram bridge gives.
+  const [activity, setActivity] = useState<string[]>([]);
   // Image attachments — uploaded to ~/.hermes/image_cache/, referenced by
   // absolute path in the outgoing prompt so Hermes' vision-capable model
   // (and its file-read tool) can pick them up.
@@ -3284,6 +3326,14 @@ function HermesChatActive({
   // Active session id — null when on the "new chat" tab. When set, subsequent
   // sends pass --resume so Hermes loads the prior turns as context.
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Mirror the session id in a ref so the request builder and the queued-send
+  // path (fired from a stale closure right after finishTurn) always read the
+  // freshest value — not the null captured when the turn began. This is what
+  // lets a fresh chat actually remember itself across turns.
+  const activeSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
   const [loadingSession, setLoadingSession] = useState(false);
   // Per-conversation model override (null = Hermes' configured default) + a
   // live context-window estimate. The composer surfaces both.
@@ -3759,11 +3809,23 @@ function HermesChatActive({
     // grounded in that project's real structure. Only once — subsequent
     // turns resume the session, which already carries it.
     const isFirstTurn = !activeSessionId && messages.length === 0;
+    // Output contract — this chat window is where the user READS the result, not
+    // a terminal. In yolo mode the agent tends to write a file and paste only a
+    // truncated diff ("... omitted N lines"), leaving the user without the
+    // actual deliverable and no way to expand it. Steer it to always return the
+    // COMPLETE, copyable content here. Injected on the first turn (carried by
+    // session memory after) and on any turn that asks for produced code/content,
+    // so a mid-chat "build me X" gets it too.
+    const OUTPUT_CONTRACT =
+      "[How to answer in this chat window] When you produce code, HTML, a document, config, or any file's contents, include the COMPLETE final content in your reply inside a single fenced code block. Do NOT abbreviate with \"... omitted N lines\", \"N more lines\", or a partial diff — the user reads and copies the result right here, so the whole thing must be present. If you also save it to a file, print the file's absolute path as well, but the full content still has to appear in your reply.";
+    const wantsArtifact =
+      /\b(html|css|json|yaml|component|script|code|snippet|one[- ]?pager|landing page|readme|full (file|code|content)|whole (file|thing))\b/i.test(text);
+    const contractPrefix = isFirstTurn || wantsArtifact ? `${OUTPUT_CONTRACT}\n\n---\n\n` : "";
     const seedPrefix = isFirstTurn && seedContext ? `${seedContext}\n\n---\n\n` : "";
     const carryPrefix = carryover
       ? `Context carried over from our previous session:\n\n${carryover}\n\n---\n\n`
       : "";
-    const promptForServer = `${seedPrefix}${carryPrefix}${imagePrefix}${text}`.trim();
+    const promptForServer = `${contractPrefix}${seedPrefix}${carryPrefix}${imagePrefix}${text}`.trim();
     // Visible chat shows the user's actual text + a count of attachments
     // (the absolute path is noisy for display).
     const displayText =
@@ -3790,6 +3852,7 @@ function HermesChatActive({
     let hermesAppended = false;
     setMessages((prev) => [...prev, userMsg]);
     setChatPhase("thinking");
+    setActivity([]);
 
     // Fetch the per-run token that gates the chat endpoint.
     let token: string | null = null;
@@ -3814,7 +3877,7 @@ function HermesChatActive({
         // the endpoint runs `hermes chat -t <value>`.
         body: JSON.stringify({
           prompt: promptForServer,
-          ...(activeSessionId ? { sessionId: activeSessionId } : {}),
+          ...(activeSessionIdRef.current ? { sessionId: activeSessionIdRef.current } : {}),
           ...(toolsets !== undefined ? { toolsets } : {}),
           // Auto-approve tools whenever this chat runs in yolo mode. graph
           // mode (preload the graphify skill) is separate — it belongs only
@@ -3924,6 +3987,25 @@ function HermesChatActive({
           }
         } else if (eventName === "info" && data) {
           fireIntel(data); // light the matching Intelligence node from the real agent's stderr
+          // Capture Hermes' session id from its stderr marker so the NEXT turn
+          // resumes THIS conversation (--resume). Without this, every turn in a
+          // fresh chat spawned a brand-new session and the agent forgot the
+          // prior turn — "save this" came back as "what's 'this'?". Update the
+          // ref immediately (the queued-send path reads it before React
+          // re-renders) plus the state for the "Resuming ·" header.
+          const sidMatch = data.match(/session_id:\s*([A-Za-z0-9_-]{6,})/);
+          if (sidMatch && sidMatch[1] && activeSessionIdRef.current !== sidMatch[1]) {
+            activeSessionIdRef.current = sidMatch[1];
+            setActiveSessionId(sidMatch[1]);
+          }
+          // Feed the live activity ticker from real status lines. Skip
+          // markers/warnings; keep each row short and the list capped.
+          for (const raw of data.split("\n")) {
+            const line = raw.trim();
+            if (!line || /session_id:|^Warning:/i.test(line) || line.length < 4) continue;
+            const row = line.length > 96 ? line.slice(0, 95) + "…" : line;
+            setActivity((a) => (a[a.length - 1] === row ? a : [...a.slice(-11), row]));
+          }
         } else if (eventName === "done") {
           // Final state already set by the chunks; just exit.
         }
@@ -4082,7 +4164,19 @@ function HermesChatActive({
             )}
             {!loadingSession && !hasMessages && <ChatEmptyState />}
             {!loadingSession &&
-              messages.map((m) => <ChatBubble key={m.id} message={m} />)}
+              messages.map((m, i) => (
+                <ChatBubble
+                  key={m.id}
+                  message={m}
+                  streaming={
+                    sending &&
+                    chatPhase === "responding" &&
+                    m.role === "hermes" &&
+                    i === messages.length - 1
+                  }
+                />
+              ))}
+            {sending && activity.length > 0 && <ActivityTicker lines={activity} />}
             {sending && chatPhase === "thinking" && <ChatTyping />}
           </div>
 
@@ -4761,11 +4855,112 @@ function CopyMsgButton({ text }: { text: string }) {
   );
 }
 
-function ChatBubble({ message }: { message: ChatMessage }) {
+// While a reply is still streaming, we DON'T render the full formatted markdown.
+// Half-parsed diffs/tables and the model's raw think-through read like a broken,
+// "dodgy" answer, and partial parses leave stray trailing dots. Instead we show a
+// calm "writing" state with a dim live tail (just the last stretch of what's
+// arriving) so it's clearly alive and in-progress — then ChatBubble swaps this
+// for the fully-formatted ChatMarkdown the moment the turn actually finishes.
+function StreamingReply({ text }: { text: string }) {
+  const clean = cleanHermesReply(text)
+    .replace(/```+/g, "") // don't flash code-fence markers
+    .replace(/^\s*[+-].*$/gm, "") // hide raw +/- diff lines mid-stream
+    .replace(/\[thinking\]/gi, "")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+  // Only a peek — the last ~320 chars — never the whole growing wall of raw text.
+  const tail = clean.length > 320 ? "…" + clean.slice(-320) : clean;
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-center gap-2">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: "#FFD21E" }} />
+        <span
+          className="hermes-mono"
+          style={{
+            fontSize: 10,
+            letterSpacing: "0.2em",
+            textTransform: "uppercase",
+            color: "rgba(255,210,30,0.85)",
+          }}
+        >
+          Hermes is writing
+        </span>
+      </div>
+      {tail && (
+        <div
+          style={{
+            fontFamily: MD_SANS,
+            fontSize: 12.5,
+            lineHeight: 1.6,
+            color: "rgba(243,233,218,0.45)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {tail}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The live activity feed — a Telegram-style running log of what Hermes is
+// actually doing this turn (Browsing…, Reading…, Writing…), fed from the
+// agent's real stderr status lines. Newest at the bottom with a spinner;
+// older rows dim out. Renders only while a turn is in flight.
+function ActivityTicker({ lines }: { lines: string[] }) {
+  const shown = lines.slice(-6);
+  return (
+    <div
+      className="rounded-xl px-3.5 py-3 max-w-[520px]"
+      style={{ background: "rgba(8,14,12,0.55)", border: "1px solid rgba(255,230,203,0.14)" }}
+    >
+      <div
+        className="hermes-mono mb-2"
+        style={{ fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(255,230,203,0.55)" }}
+      >
+        Live activity
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {shown.map((l, i) => {
+          const last = i === shown.length - 1;
+          return (
+            <div key={`${i}-${l.slice(0, 24)}`} className="flex items-start gap-2 min-w-0">
+              {last ? (
+                <Loader2 className="h-3 w-3 animate-spin shrink-0 mt-[1px]" style={{ color: "#FFD21E" }} />
+              ) : (
+                <span className="h-1 w-1 rounded-full shrink-0 mt-[6px]" style={{ background: "rgba(255,230,203,0.35)" }} />
+              )}
+              <span
+                className="truncate"
+                style={{
+                  fontFamily: MD_SANS,
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  color: last ? "rgba(243,233,218,0.85)" : `rgba(243,233,218,${0.3 + i * 0.08})`,
+                }}
+              >
+                {l}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ChatBubble({ message, streaming }: { message: ChatMessage; streaming?: boolean }) {
   const isUser = message.role === "user";
   if (isUser) {
     // Cream card, softly rounded with a squared corner anchoring toward the
     // avatar. Shadow instead of a hard border so it floats over the art.
+    //
+    // Rendered by the SAME ChatMarkdown as a Hermes reply, on its light
+    // palette — a pasted skill file or config gets real fenced code blocks,
+    // tables and lists here, not a wall of literal backticks. `pre-wrap` is
+    // gone on purpose: the renderer owns whitespace now (code keeps its
+    // indentation, prose reflows).
     return (
       <div className="flex justify-end items-start gap-3">
         <div
@@ -4775,11 +4970,11 @@ function ChatBubble({ message }: { message: ChatMessage }) {
             color: BG,
             borderRadius: "16px 4px 16px 16px",
             boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
-            whiteSpace: "pre-wrap",
             wordBreak: "break-word",
+            minWidth: 0,
           }}
         >
-          {message.content}
+          <ChatMarkdown text={message.content} surface="light" />
         </div>
         <UserAvatar />
       </div>
@@ -4827,6 +5022,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
             >
               {message.content}
             </pre>
+          ) : streaming ? (
+            <StreamingReply text={message.content} />
           ) : message.content ? (
             <ChatMarkdown text={message.content} />
           ) : (
@@ -4873,8 +5070,111 @@ const MD_SANS =
   'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const MD_MONO = '"Courier Prime", ui-monospace, monospace';
 
+// ── Surface palettes ───────────────────────────────────────────────────────
+// The SAME renderer draws both chat bubbles, so every colour it uses has to
+// come from a palette rather than a literal. "dark" is the teal assistant
+// card; "light" is the cream user card. Every foreground below was checked
+// against its real background and clears WCAG AA (4.5:1) — see the ratios in
+// the comments. Change one and re-check it.
+export type MdSurface = "dark" | "light";
+interface MdPalette {
+  surface: MdSurface;
+  body: string; // paragraph / table / list text
+  strong: string; // **bold**, headings
+  em: string; // *italic*, blockquotes
+  muted: string; // captions, quiet markers
+  faint: string; // dimmest chrome (uppercase labels, footnotes)
+  link: string;
+  linkUnderline: string;
+  accent: string; // h3 labels, ordered-list numerals, blockquote rule
+  hair: string; // hairline borders
+  hairSoft: string;
+  inlineCodeBg: string;
+  panelBg: string; // fenced code / diff card interior
+  panelHeaderBg: string;
+  addFg: string;
+  addBg: string;
+  delFg: string;
+  delBg: string;
+  code: {
+    plain: string;
+    comment: string;
+    string: string;
+    number: string;
+    keyword: string;
+    type: string;
+    prop: string;
+    punct: string;
+  };
+}
+
+const MD_PALETTES: Record<MdSurface, MdPalette> = {
+  // On the assistant card (#0A201F → #051212) and its code panel (#0A1413).
+  dark: {
+    surface: "dark",
+    body: "#F3E9DA", // 14.1:1
+    strong: CREAM, // 14.1:1
+    em: "#E8DCC8", // 12.5:1
+    muted: "#B9AE9C", // 7.7:1
+    faint: "#9A8F7E", // 5.3:1
+    link: "#FFD21E", // 11.7:1
+    linkUnderline: "rgba(255,210,30,0.45)",
+    accent: "#FFD21E",
+    hair: "rgba(255,230,203,0.2)",
+    hairSoft: "rgba(255,230,203,0.12)",
+    inlineCodeBg: "rgba(255,230,203,0.12)",
+    panelBg: "rgba(0,0,0,0.5)",
+    panelHeaderBg: "rgba(255,230,203,0.04)",
+    addFg: "#86efac",
+    addBg: "rgba(134,239,172,0.07)",
+    delFg: "#fca5a5",
+    delBg: "rgba(252,165,165,0.06)",
+    code: {
+      plain: "#FFE6CB", // 15.5:1
+      comment: "#8E9C8F", // 6.5:1
+      string: "#86EFAC", // 13.3:1
+      number: "#7DD3FC", // 11.2:1
+      keyword: "#FFD21E", // 12.9:1
+      type: "#F0ABFC", // 10.6:1
+      prop: "#5FD0C5", // 10.1:1
+      punct: "#C3B8A6", // 9.6:1
+    },
+  },
+  // On the cream user card (#FFF2DE → #FFE6CB) and its code panel (#EFDCC4).
+  light: {
+    surface: "light",
+    body: "#0B1F1E", // 14.2:1
+    strong: "#071D1C", // 14.5:1
+    em: "#4A4133", // 8.3:1
+    muted: "#5C5140", // 6.4:1
+    faint: "#5C5140", // 6.4:1 — no dimmer step; cream leaves no headroom
+    link: "#8A5A00", // 4.9:1
+    linkUnderline: "rgba(138,90,0,0.45)",
+    accent: "#8A5A00",
+    hair: "rgba(7,29,28,0.22)",
+    hairSoft: "rgba(7,29,28,0.13)",
+    inlineCodeBg: "rgba(7,29,28,0.09)",
+    panelBg: "#EFDCC4",
+    panelHeaderBg: "rgba(7,29,28,0.06)",
+    addFg: "#14532D",
+    addBg: "rgba(21,128,61,0.12)",
+    delFg: "#9F1239",
+    delBg: "rgba(159,18,57,0.1)",
+    code: {
+      plain: "#12211F", // 12.4:1
+      comment: "#655C4D", // 4.9:1
+      string: "#166534", // 5.3:1
+      number: "#1D4ED8", // 5.0:1
+      keyword: "#9A3412", // 5.5:1
+      type: "#7C2D8F", // 6.0:1
+      prop: "#115E59", // 5.7:1
+      punct: "#4A4438", // 7.2:1
+    },
+  },
+};
+
 // Inline: `code`, **bold**, *italic*, [text](url), bare urls.
-function mdInline(s: string, keyBase: string): ReactNode[] {
+function mdInline(s: string, keyBase: string, p: MdPalette): ReactNode[] {
   const parts: ReactNode[] = [];
   const re =
     /(`([^`]+)`|\*\*([^*]+)\*\*|\*([^*\s][^*]*)\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s<>()]+))/g;
@@ -4882,9 +5182,9 @@ function mdInline(s: string, keyBase: string): ReactNode[] {
   let m: RegExpExecArray | null;
   let i = 0;
   const linkStyle = {
-    color: "#FFD21E",
+    color: p.link,
     textDecoration: "underline",
-    textDecorationColor: "rgba(255,210,30,0.45)",
+    textDecorationColor: p.linkUnderline,
     textUnderlineOffset: 2,
   } as const;
   // Any "**" left in plain text after the regex pass is an ORPHAN (its pair
@@ -4900,8 +5200,8 @@ function mdInline(s: string, keyBase: string): ReactNode[] {
           style={{
             fontFamily: MD_MONO,
             fontSize: "12.5px",
-            background: "rgba(255,230,203,0.12)",
-            color: "#FFE6CB",
+            background: p.inlineCodeBg,
+            color: p.code.plain,
             padding: "1px 5px",
             borderRadius: 4,
           }}
@@ -4911,13 +5211,13 @@ function mdInline(s: string, keyBase: string): ReactNode[] {
       );
     } else if (m[3] !== undefined) {
       parts.push(
-        <strong key={`${keyBase}-b${i}`} style={{ color: CREAM, fontWeight: 650 }}>
+        <strong key={`${keyBase}-b${i}`} style={{ color: p.strong, fontWeight: 650 }}>
           {m[3]}
         </strong>,
       );
     } else if (m[4] !== undefined) {
       parts.push(
-        <em key={`${keyBase}-i${i}`} style={{ color: "#E8DCC8" }}>
+        <em key={`${keyBase}-i${i}`} style={{ color: p.em }}>
           {m[4]}
         </em>,
       );
@@ -4945,69 +5245,190 @@ function mdInline(s: string, keyBase: string): ReactNode[] {
   return parts;
 }
 
-// Diff card — green adds, red removals, amber hunk headers, cream file line.
-function MdDiffBlock({ lines: dl, k }: { lines: string[]; k: string }) {
+/** Copy-to-clipboard control for a code/diff panel. Confirms in place. */
+function MdCopyButton({ text, p }: { text: string; p: MdPalette }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(false), 1400);
+    return () => clearTimeout(t);
+  }, [done]);
+  return (
+    <button
+      type="button"
+      // Hidden until the panel is hovered, but always reachable by keyboard —
+      // .md-panel:focus-within reveals it too (see styles.css).
+      className="hermes-mono md-copy-btn"
+      aria-label={done ? "Copied" : "Copy code"}
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(text);
+          setDone(true);
+        } catch {
+          // Clipboard blocked (insecure origin / permission) — fall back to a
+          // hidden textarea so the button still does what it promises.
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand("copy");
+            setDone(true);
+          } catch {
+            /* nothing else to try */
+          }
+          ta.remove();
+        }
+      }}
+      style={{
+        fontSize: 9,
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        color: done ? p.code.string : p.muted,
+        border: `1px solid ${p.hairSoft}`,
+        borderRadius: 5,
+        padding: "2px 7px",
+        background: p.panelHeaderBg,
+        cursor: "pointer",
+      }}
+    >
+      {done ? "copied" : "copy"}
+    </button>
+  );
+}
+
+/** Shared chrome for fenced code and diff cards: border, label chip, copy. */
+function MdPanel({
+  label,
+  copyText,
+  p,
+  children,
+}: {
+  label: string;
+  copyText: string;
+  p: MdPalette;
+  children: ReactNode;
+}) {
   return (
     <div
-      key={k}
+      className="md-panel"
       style={{
         margin: "10px 0",
-        border: "1px solid rgba(255,230,203,0.2)",
+        border: `1px solid ${p.hair}`,
         borderRadius: 10,
-        background: "rgba(0,0,0,0.45)",
+        background: p.panelBg,
         overflow: "hidden",
       }}
     >
       <div
-        className="hermes-mono"
+        className="hermes-mono flex items-center justify-between gap-2"
         style={{
           fontSize: 9,
           letterSpacing: "0.18em",
           textTransform: "uppercase",
-          color: "rgba(255,210,30,0.75)",
-          padding: "5px 12px",
-          borderBottom: "1px solid rgba(255,230,203,0.12)",
-          background: "rgba(255,230,203,0.04)",
+          color: p.muted,
+          padding: "4px 8px 4px 12px",
+          borderBottom: `1px solid ${p.hairSoft}`,
+          background: p.panelHeaderBg,
+          minHeight: 25,
         }}
       >
-        diff
+        <span className="truncate">{label}</span>
+        <MdCopyButton text={copyText} p={p} />
       </div>
-      <div style={{ overflowX: "auto", padding: "8px 0", fontFamily: MD_MONO, fontSize: 12, lineHeight: 1.6 }}>
-        {dl.map((l, j) => {
-          const isFile =
-            /^(diff --git|[+]{3}\s|-{3}\s|index\s)/.test(l) || /^[ab]\/\S+\s*(→|->)\s*[ab]\//.test(l);
-          const isHunk = /^@@/.test(l);
-          const isAdd = !isFile && l.startsWith("+");
-          const isDel = !isFile && l.startsWith("-");
-          return (
-            <div
-              key={j}
-              style={{
-                padding: "0 12px",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                color: isFile
-                  ? CREAM
-                  : isHunk
-                    ? "rgba(255,210,30,0.8)"
-                    : isAdd
-                      ? "#86efac"
-                      : isDel
-                        ? "#fca5a5"
-                        : "rgba(243,233,218,0.75)",
-                background: isAdd
-                  ? "rgba(134,239,172,0.07)"
-                  : isDel
-                    ? "rgba(252,165,165,0.06)"
-                    : "transparent",
-                fontWeight: isFile ? 600 : 400,
-              }}
-            >
-              {l || " "}
-            </div>
-          );
-        })}
-      </div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Fenced code. Indentation is preserved exactly and long lines scroll
+ * horizontally — code is never wrapped, because a wrapped line misrepresents
+ * what the file actually says.
+ */
+function MdCodeBlock({ code, lang, p }: { code: string; lang: string; p: MdPalette }) {
+  const tokens = useMemo(() => tokenizeCode(code, lang), [code, lang]);
+  const tint: Record<CodeToken["kind"], string> = {
+    plain: p.code.plain,
+    comment: p.code.comment,
+    string: p.code.string,
+    number: p.code.number,
+    keyword: p.code.keyword,
+    type: p.code.type,
+    prop: p.code.prop,
+    punct: p.code.punct,
+  };
+  return (
+    <MdPanel label={lang || "code"} copyText={code} p={p}>
+      <pre
+        style={{
+          margin: 0,
+          padding: "10px 12px",
+          overflowX: "auto",
+          whiteSpace: "pre",
+          tabSize: 2,
+          fontFamily: MD_MONO,
+          fontSize: 12,
+          lineHeight: 1.6,
+          color: p.code.plain,
+        }}
+      >
+        <code>
+          {tokens.map((t, j) =>
+            t.kind === "plain" ? (
+              <span key={j}>{t.text}</span>
+            ) : (
+              <span key={j} style={{ color: tint[t.kind] }}>
+                {t.text}
+              </span>
+            ),
+          )}
+        </code>
+      </pre>
+    </MdPanel>
+  );
+}
+
+// Diff card — green adds, red removals, accented hunk headers, bold file line.
+function MdDiffBlock({ lines: dl, k, p }: { lines: string[]; k: string; p: MdPalette }) {
+  return (
+    <div key={k}>
+      <MdPanel label="diff" copyText={dl.join("\n")} p={p}>
+        <div style={{ overflowX: "auto", padding: "8px 0", fontFamily: MD_MONO, fontSize: 12, lineHeight: 1.6 }}>
+          {dl.map((l, j) => {
+            const isFile =
+              /^(diff --git|[+]{3}\s|-{3}\s|index\s)/.test(l) || /^[ab]\/\S+\s*(→|->)\s*[ab]\//.test(l);
+            const isHunk = /^@@/.test(l);
+            const isAdd = !isFile && l.startsWith("+");
+            const isDel = !isFile && l.startsWith("-");
+            return (
+              <div
+                key={j}
+                style={{
+                  padding: "0 12px",
+                  whiteSpace: "pre",
+                  color: isFile
+                    ? p.strong
+                    : isHunk
+                      ? p.accent
+                      : isAdd
+                        ? p.addFg
+                        : isDel
+                          ? p.delFg
+                          : p.code.plain,
+                  background: isAdd ? p.addBg : isDel ? p.delBg : "transparent",
+                  fontWeight: isFile ? 600 : 400,
+                }}
+              >
+                {l || " "}
+              </div>
+            );
+          })}
+        </div>
+      </MdPanel>
     </div>
   );
 }
@@ -5018,7 +5439,15 @@ function MdDiffBlock({ lines: dl, k }: { lines: string[]; k: string }) {
 // glance; thinking before any reference (the aggregator/core) stays amber.
 const MOA_REF_COLORS = ["#5FD0C5", "#A78BFA", "#86efac", "#F0ABFC", "#7DD3FC"];
 
-function ChatMarkdown({ text }: { text: string }) {
+function ChatMarkdown({
+  text,
+  surface = "dark",
+}: {
+  text: string;
+  /** Which bubble this is drawn on. Picks the whole colour palette. */
+  surface?: MdSurface;
+}) {
+  const p = MD_PALETTES[surface];
   const lines = text.split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
@@ -5026,7 +5455,7 @@ function ChatMarkdown({ text }: { text: string }) {
   const moaAccent = () =>
     moaRefIdx >= 0
       ? MOA_REF_COLORS[moaRefIdx % MOA_REF_COLORS.length]
-      : "rgba(255,210,30,0.85)";
+      : p.accent;
 
   const isDiffStart = (l: string) =>
     /^diff --git\s/.test(l) ||
@@ -5073,18 +5502,18 @@ function ChatMarkdown({ text }: { text: string }) {
               fontSize: 9.5,
               letterSpacing: "0.16em",
               textTransform: "uppercase",
-              color: "rgba(255,230,203,0.4)",
+              color: p.faint,
               cursor: "pointer",
               listStyle: "none",
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
-              border: "1px solid rgba(255,230,203,0.14)",
+              border: `1px solid ${p.hairSoft}`,
               borderRadius: 6,
               padding: "3px 8px",
             }}
           >
-            <span style={{ color: "rgba(255,210,30,0.6)" }}>⚙</span>
+            <span style={{ color: p.accent }}>⚙</span>
             session initialized · toolsets &amp; context
             <span style={{ opacity: 0.6 }}>▸ expand</span>
           </summary>
@@ -5093,13 +5522,13 @@ function ChatMarkdown({ text }: { text: string }) {
             style={{
               fontSize: 10.5,
               lineHeight: 1.6,
-              color: "rgba(243,233,218,0.55)",
+              color: p.muted,
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
               padding: "8px 10px",
               marginTop: 6,
-              background: "rgba(0,0,0,0.35)",
-              border: "1px solid rgba(255,230,203,0.1)",
+              background: p.panelBg,
+              border: `1px solid ${p.hairSoft}`,
               borderRadius: 8,
             }}
           >
@@ -5199,11 +5628,11 @@ function ChatMarkdown({ text }: { text: string }) {
             </span>
             <span
               className="hermes-mono"
-              style={{ fontSize: 10, color: "rgba(255,230,203,0.6)", whiteSpace: "nowrap" }}
+              style={{ fontSize: 10, color: p.muted, whiteSpace: "nowrap" }}
             >
               {moaRef[3].trim()}
             </span>
-            <span style={{ flex: 1, borderTop: "1px solid rgba(255,230,203,0.14)" }} />
+            <span style={{ flex: 1, borderTop: `1px solid ${p.hairSoft}` }} />
             <span
               className="hermes-mono"
               style={{ fontSize: 8.5, letterSpacing: "0.14em", color: `${accent}99`, whiteSpace: "nowrap" }}
@@ -5220,7 +5649,7 @@ function ChatMarkdown({ text }: { text: string }) {
                 fontFamily: MD_SANS,
                 fontSize: 13,
                 fontStyle: "italic",
-                color: "rgba(243,233,218,0.6)",
+                color: p.muted,
                 lineHeight: 1.6,
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
@@ -5296,7 +5725,7 @@ function ChatMarkdown({ text }: { text: string }) {
               fontFamily: MD_SANS,
               fontSize: 13,
               fontStyle: "italic",
-              color: "rgba(243,233,218,0.55)",
+              color: p.muted,
               lineHeight: 1.6,
             }}
           >
@@ -5317,7 +5746,7 @@ function ChatMarkdown({ text }: { text: string }) {
           style={{
             fontSize: 9.5,
             letterSpacing: "0.14em",
-            color: "rgba(255,230,203,0.35)",
+            color: p.faint,
             margin: "4px 0",
           }}
         >
@@ -5342,50 +5771,9 @@ function ChatMarkdown({ text }: { text: string }) {
       const looksDiff =
         lang === "diff" || body.filter((l) => /^[+-]/.test(l)).length >= Math.max(2, body.length * 0.3);
       if (looksDiff) {
-        blocks.push(<MdDiffBlock key={key} k={key} lines={body} />);
+        blocks.push(<MdDiffBlock key={key} k={key} lines={body} p={p} />);
       } else {
-        blocks.push(
-          <div
-            key={key}
-            style={{
-              margin: "10px 0",
-              border: "1px solid rgba(255,230,203,0.2)",
-              borderRadius: 10,
-              background: "rgba(0,0,0,0.5)",
-              overflow: "hidden",
-            }}
-          >
-            {lang && (
-              <div
-                className="hermes-mono"
-                style={{
-                  fontSize: 9,
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                  color: "rgba(255,230,203,0.55)",
-                  padding: "5px 12px",
-                  borderBottom: "1px solid rgba(255,230,203,0.12)",
-                  background: "rgba(255,230,203,0.04)",
-                }}
-              >
-                {lang}
-              </div>
-            )}
-            <pre
-              style={{
-                margin: 0,
-                padding: "10px 12px",
-                overflowX: "auto",
-                fontFamily: MD_MONO,
-                fontSize: 12,
-                lineHeight: 1.6,
-                color: "#FFE6CB",
-              }}
-            >
-              {body.join("\n")}
-            </pre>
-          </div>,
-        );
+        blocks.push(<MdCodeBlock key={key} code={body.join("\n")} lang={lang} p={p} />);
       }
       continue;
     }
@@ -5398,7 +5786,7 @@ function ChatMarkdown({ text }: { text: string }) {
         i++;
       }
       while (body.length && body[body.length - 1] === "") body.pop();
-      blocks.push(<MdDiffBlock key={key} k={key} lines={body} />);
+      blocks.push(<MdDiffBlock key={key} k={key} lines={body} p={p} />);
       continue;
     }
 
@@ -5426,14 +5814,14 @@ function ChatMarkdown({ text }: { text: string }) {
                       fontSize: 9.5,
                       letterSpacing: "0.16em",
                       textTransform: "uppercase",
-                      color: "rgba(255,210,30,0.8)",
+                      color: p.accent,
                       textAlign: "left",
                       padding: "6px 12px",
-                      borderBottom: "1px solid rgba(255,230,203,0.3)",
+                      borderBottom: `1px solid ${p.hair}`,
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {mdInline(h, `${key}-h${j}`)}
+                    {mdInline(h, `${key}-h${j}`, p)}
                   </th>
                 ))}
               </tr>
@@ -5449,11 +5837,11 @@ function ChatMarkdown({ text }: { text: string }) {
                         fontSize: 13.5,
                         lineHeight: 1.5,
                         padding: "7px 12px",
-                        borderBottom: "1px solid rgba(255,230,203,0.1)",
+                        borderBottom: `1px solid ${p.hairSoft}`,
                         verticalAlign: "top",
                       }}
                     >
-                      {mdInline(c, `${key}-r${ri}c${ci}`)}
+                      {mdInline(c, `${key}-r${ri}c${ci}`, p)}
                     </td>
                   ))}
                 </tr>
@@ -5476,19 +5864,19 @@ function ChatMarkdown({ text }: { text: string }) {
         <div
           key={key}
           style={{
-            borderLeft: "2px solid rgba(255,210,30,0.5)",
+            borderLeft: `2px solid ${p.accent}`,
             paddingLeft: 12,
             margin: "10px 0",
             fontFamily: '"Fraunces", serif',
             fontStyle: "italic",
             fontSize: 14.5,
             lineHeight: 1.65,
-            color: "#E8DCC8",
+            color: p.em,
           }}
         >
           {q.map((ql, j) => (
             <p key={j} style={{ margin: "3px 0" }}>
-              {mdInline(ql, `${key}-q${j}`)}
+              {mdInline(ql, `${key}-q${j}`, p)}
             </p>
           ))}
         </div>,
@@ -5499,7 +5887,7 @@ function ChatMarkdown({ text }: { text: string }) {
     // Horizontal rule.
     if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
       blocks.push(
-        <div key={key} style={{ borderTop: "1px solid rgba(255,230,203,0.18)", margin: "14px 0" }} />,
+        <div key={key} style={{ borderTop: `1px solid ${p.hair}`, margin: "14px 0" }} />,
       );
       i++;
       continue;
@@ -5520,12 +5908,12 @@ function ChatMarkdown({ text }: { text: string }) {
               fontFamily: MD_SANS,
               fontSize: 15,
               fontWeight: 650,
-              color: CREAM,
+              color: p.strong,
               lineHeight: 1.6,
               margin: "12px 0 4px",
             }}
           >
-            {mdInline(h[2], key)}
+            {mdInline(h[2], key, p)}
           </p>,
         );
         i++;
@@ -5539,13 +5927,13 @@ function ChatMarkdown({ text }: { text: string }) {
               fontFamily: '"Fraunces", serif',
               fontSize: depth === 1 ? 18 : 16,
               fontWeight: 600,
-              color: CREAM,
+              color: p.strong,
               margin: "16px 0 6px",
               paddingBottom: depth <= 2 ? 5 : 0,
-              borderBottom: "1px solid rgba(255,230,203,0.14)",
+              borderBottom: `1px solid ${p.hairSoft}`,
             }}
           >
-            {mdInline(h[2], key)}
+            {mdInline(h[2], key, p)}
           </div>,
         );
       } else {
@@ -5557,11 +5945,11 @@ function ChatMarkdown({ text }: { text: string }) {
               fontSize: 10.5,
               letterSpacing: "0.2em",
               textTransform: "uppercase",
-              color: "rgba(255,210,30,0.85)",
+              color: p.accent,
               margin: "14px 0 4px",
             }}
           >
-            {mdInline(h[2], key)}
+            {mdInline(h[2], key, p)}
           </div>,
         );
       }
@@ -5586,12 +5974,12 @@ function ChatMarkdown({ text }: { text: string }) {
             <div key={j} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
               <span
                 className="hermes-mono"
-                style={{ fontSize: 12, color: "#FFD21E", flexShrink: 0, minWidth: 18, textAlign: "right" }}
+                style={{ fontSize: 12, color: p.accent, flexShrink: 0, minWidth: 18, textAlign: "right" }}
               >
                 {it.num}.
               </span>
               <span style={{ fontFamily: MD_SANS, fontSize: 14.5, lineHeight: 1.65 }}>
-                {mdInline(it.text, `${key}-${j}`)}
+                {mdInline(it.text, `${key}-${j}`, p)}
               </span>
             </div>
           ))}
@@ -5632,8 +6020,8 @@ function ChatMarkdown({ text }: { text: string }) {
                 style={{
                   color:
                     it.level === 0
-                      ? "rgba(255,230,203,0.5)"
-                      : "rgba(255,230,203,0.32)",
+                      ? p.muted
+                      : p.faint,
                   flexShrink: 0,
                   fontSize: 11,
                   lineHeight: 1.6,
@@ -5642,7 +6030,7 @@ function ChatMarkdown({ text }: { text: string }) {
                 {it.level === 0 ? "•" : "–"}
               </span>
               <span style={{ fontFamily: MD_SANS, fontSize: 14.5, lineHeight: 1.6 }}>
-                {mdInline(it.text, `${key}-${j}`)}
+                {mdInline(it.text, `${key}-${j}`, p)}
               </span>
             </div>
           ))}
@@ -5685,12 +6073,12 @@ function ChatMarkdown({ text }: { text: string }) {
     }
     blocks.push(
       <p key={key} style={{ fontFamily: MD_SANS, fontSize: 14.5, lineHeight: 1.68, margin: "7px 0" }}>
-        {mdInline(para.join(" "), key)}
+        {mdInline(para.join(" "), key, p)}
       </p>,
     );
   }
 
-  return <div style={{ color: "#F3E9DA" }}>{blocks}</div>;
+  return <div style={{ color: p.body }}>{blocks}</div>;
 }
 
 // Storage key co-owned with the sidebar's SidebarIdentity. Update one,
@@ -5797,22 +6185,12 @@ function ChatTyping() {
           background: "rgba(255,230,203,0.04)",
         }}
       >
-        <div className="flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-none animate-pulse" style={{ background: CREAM }} />
-          <span
-            className="h-1.5 w-1.5 rounded-none animate-pulse"
-            style={{ background: CREAM, animationDelay: "0.15s" }}
-          />
-          <span
-            className="h-1.5 w-1.5 rounded-none animate-pulse"
-            style={{ background: CREAM, animationDelay: "0.3s" }}
-          />
-        </div>
+        <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: CREAM }} />
         <span
           className="hermes-mono"
           style={{ fontSize: 11, color: "rgba(255,230,203,0.6)", letterSpacing: "0.04em" }}
         >
-          Hermes is thinking{secs >= 2 ? ` · ${secs}s` : "…"}
+          Hermes is thinking{secs >= 2 ? ` · ${secs}s` : ""}
         </span>
       </div>
     </div>

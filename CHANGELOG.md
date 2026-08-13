@@ -5,22 +5,70 @@ versions are kept as zipped artefacts locally for rollback.
 
 ---
 
+## V3.0 — 26 Jul 2026
+
+The **never-dead-end** release — turns that resume themselves, and a chat
+window that always tells you what it is doing.
+
+### New — turns recover instead of stopping
+
+- A turn that dies mid-answer now **resumes the same session automatically**
+  rather than leaving you a half-finished sentence. Bounded and disclosed:
+  5 resumes, 30 minutes, $2, with loop detection that stops early when the
+  same failure or the same failing tool call repeats.
+- A user abort is never resumed, and a recovered turn says so — the finished
+  header reads **· 1 RESUME** so a stitched answer never reads as a clean one.
+
+### New — you can see what it is doing
+
+- A **live strip** on the in-flight message: elapsed timer, running tool count,
+  the current tool, and the state it is in. Previously this only appeared once
+  the turn was already over.
+- It distinguishes **thinking** from **dead** — output stalled while the
+  connection is alive reads differently from a stream that has gone silent.
+
+### New — the context window, broken down
+
+- Click the token pill for a full breakdown: messages, memory files, skills,
+  custom agents, MCP tools per server, and free space, against the selected
+  model's real window. The headline total comes from the harness; the per-row
+  split is an estimate and is labelled as one.
+
+### Fixed
+
+- Usage and cost now report correctly on OpenRouter-routed models. A turn whose
+  last provider call errored used to zero the whole turn's usage.
+- Chat titles no longer show a skill's raw frontmatter.
+- Messages you send are rendered as markdown — fenced code blocks, syntax
+  highlighting, and preserved indentation instead of raw text.
+
+---
+
 ## V2.12 — 06 Jul 2026
 
-Voice reliability + key retention. (The memory-recall / Brain features are
-being finalised separately and are **not** in this build.)
+The **voice memory recall** release — a Jarvis-style "pull up my notes" flow
+across voice and the Memory brain.
 
-### Fixed — the voice key is retained
+### New — voice-driven memory recall
 
-- Enter your OpenAI key once and it's saved to `~/.hermes/.env` and reused
-  across every browser, port and dev-server restart — no more re-prompting.
-- The voice engine now always boots from the saved key before opening a
-  call, so a saved key can never fall back to the setup card by mistake.
+- Say **"pull up my \<topic\>"** to the Oracle and it opens your Memory brain,
+  **flies the 3D graph to the matching cluster** (those nodes flare bright),
+  and surfaces the matching documents — from any page, no need to open Memory
+  first. Powered by a new `focus_memory` voice tool + a `?focus=` deep-link.
+- **Click a document → Copy the whole file.** The Knowledge Explorer now reads
+  the full markdown body from your vault (new loopback `/__memory_note`
+  endpoint, path-safe) so **Copy document** grabs the entire note, not just the
+  preview — plus a **Read full document** inline view.
 
-### Also in this build
+### New — voice customization
 
-- Voice can navigate the dashboard ("take me to memory"), pause the mic
-  mid-call, and shows an "apps used" row under each answer.
+- Pick your call voice (Sage, Cedar, Marin, Coral, Alloy, Ash, Verse, Ballad)
+  from the widget, **hear a sample**, and it's remembered for every call.
+
+### Also
+
+- Voice can now **navigate the dashboard** ("take me to memory"), **pause the
+  mic** mid-call, and shows an **"apps used"** row under each answer.
 
 ---
 
