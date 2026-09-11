@@ -48,5 +48,8 @@ src/data/graphs/*.json
 !src/data/graphs/index.json
 !src/data/graphs/power-design.json
 
+# Envato-licensed LUTs: usable in Jack's own productions, not redistributable.
+public/color-lab/luts/imported/
+
 # local brainstorming-skill scratch state (server pid/token/port, not source)
 .superpowers/

@@ -163,7 +163,7 @@ export function OracleWaveform({
 
       // --- ease inputs ---------------------------------------------------
       const target = Math.max(0, Math.min(1, levelRef.current));
-      smoothed += (target - smoothed) * 0.14; // snappier — react quickly as Jack talks
+      smoothed += (target - smoothed) * 0.14; // snappier — react quickly to speech
       const targetPulse = modeIntensity(modeRef.current);
       modePulse += (targetPulse - modePulse) * 0.04;
 

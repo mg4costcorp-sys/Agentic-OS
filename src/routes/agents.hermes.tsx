@@ -54,7 +54,7 @@ import logoVendorCohere from "@/assets/logo-cohere.svg";
 import confetti from "canvas-confetti";
 import hermesLogo from "@/assets/hermes-agent.png";
 import hermesPortrait from "@/assets/hermes-portrait.png";
-import pantheonBanner from "@/assets/hermes-art/00-banner-wide.png";
+import pantheonBanner from "@/assets/hermes-art/00-banner-wide.webp";
 import pantheon01 from "@/assets/hermes-art/01-hermes-messenger.webp";
 // Pre-built tuple for deterministic session→avatar hashing in the collapsed
 // chat sidebar. We re-export it as `PANTHEON_AVATARS` further down once all
@@ -72,9 +72,9 @@ import pantheon07 from "@/assets/hermes-art/07-alchemist-workshop.webp";
 import pantheon08 from "@/assets/hermes-art/08-philosopher.webp";
 import pantheon09 from "@/assets/hermes-art/09-mapmaker.webp";
 import pantheon10 from "@/assets/hermes-art/10-mercury-flight.webp";
-import skillsHero from "@/assets/hermes-art/_skills-hero.png";
-import ghConnect from "@/assets/hermes-art/_gh-connect.png";
-import ghPush from "@/assets/hermes-art/_gh-push.png";
+import skillsHero from "@/assets/hermes-art/_skills-hero.webp";
+import ghConnect from "@/assets/hermes-art/_gh-connect.webp";
+import ghPush from "@/assets/hermes-art/_gh-push.webp";
 import skillOverlay from "@/assets/hermes-art/_skill-overlay.webp";
 // Provider/model marks — Simple Icons CDN 404s on trademarked AI logos
 // (openai, groq, xai, cohere). We bundle local PNG/SVG fallbacks so the

@@ -1,15 +1,20 @@
+import { websiteOSPlugin } from "./scripts/website-os-plugin";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { execFile, execFileSync, execSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
+  closeSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   createReadStream,
   lstatSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -23,7 +28,7 @@ import {
   stat as statAsync,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { delimiter as pathDelimiter, join, relative, resolve, sep } from "node:path";
 import yaml from "js-yaml";
 // The turn watchdog's decision rules live in their own module because every
 // branch in them spends money — see the header of that file. Pure functions,
@@ -1011,6 +1016,7 @@ export default defineConfig({
   },
   vite: {
     plugins: [
+      websiteOSPlugin(),
       {
         name: "claude-os-live-data",
         configureServer(server) {
@@ -1933,7 +1939,7 @@ export default defineConfig({
           // API key never reaches the browser. Body: { text, voice } where
           // voice is a Fish model reference id. Returns audio/mpeg bytes.
           // Key comes from ~/.hermes/.env (FISH_API_KEY, or SAKANA_API_KEY
-          // when its value carries the fish_ prefix — where Jack parked it).
+          // when its value carries the fish_ prefix — used by some existing configurations).
           server.middlewares.use("/__fish_tts", (req, res, next) => {
             if (req.method !== "POST") return next();
             if (!isLoopback(req)) {
@@ -6472,7 +6478,7 @@ export default defineConfig({
                     const explicit = fm
                       ? fm[0].match(/^description:\s*["']?(.+?)["']?\s*$/m)?.[1]
                       : undefined;
-                    let description =
+                    const description =
                       explicit?.trim() ||
                       raw
                         .split("\n")
@@ -8055,6 +8061,53 @@ export default defineConfig({
             return out;
           }
 
+          // Windows separates PATH with ';' and its env names are
+          // case-insensitive — appending with ':' welds the addition onto the
+          // last real entry and destroys it, and a spread emits both `Path`
+          // and `PATH`. Build the child's environment deliberately.
+          function designChildEnv(): NodeJS.ProcessEnv {
+            const env = { ...process.env };
+            for (const k of Object.keys(env)) if (k.toLowerCase() === "path") delete env[k];
+            const extra = IS_WIN
+              ? [join(LOCAL_APP_DATA, "Programs"), join(homedir(), "AppData", "Roaming", "npm")]
+              : [join(homedir(), ".local", "bin")];
+            env.PATH = [process.env.PATH ?? "", ...extra].filter(Boolean).join(pathDelimiter);
+            return env;
+          }
+
+          // Node refuses to spawn a .cmd/.bat without a shell, so prefer a
+          // real .exe when one sits beside the shim.
+          function designCliBin(name: string): string | null {
+            let bin = resolveCliBin(name) ?? null;
+            if (bin && IS_WIN && /\.cmd$/i.test(bin)) {
+              const exe = bin.replace(/\.cmd$/i, ".exe");
+              if (existsSync(exe)) bin = exe;
+            }
+            return bin;
+          }
+          const needsShell = (bin: string) => IS_WIN && /\.(cmd|bat)$/i.test(bin);
+
+          // Where the operator's real Desktop/Downloads live. On Windows these
+          // are routinely redirected into OneDrive, and writing to the literal
+          // home path puts work in a folder Explorer never shows.
+          function shellFolder(name: "Desktop" | "Documents" | "Downloads"): string {
+            const home = homedir();
+            const bases = [home];
+            if (IS_WIN) {
+              const od =
+                process.env.OneDrive ||
+                process.env.OneDriveConsumer ||
+                process.env.OneDriveCommercial;
+              if (od) bases.unshift(od);
+              bases.push(join(home, "OneDrive"));
+            }
+            for (const b of bases) {
+              const candidate = join(b, name);
+              if (existsSync(candidate)) return candidate;
+            }
+            return join(home, name);
+          }
+
           function designRoots(): string[] {
             try {
               const cfgPath = join(homedir(), ".claude-os", "config.json");
@@ -8176,7 +8229,7 @@ export default defineConfig({
                     // Label folders with forward slashes on every OS so the
                     // filter dropdown reads the same on Windows as it does
                     // here, and matches how design.roots is documented.
-                    const rel = designPosix(full.slice(root.length + 1));
+                    const rel = designPosix(relative(root, full));
                     const slash = rel.lastIndexOf("/");
                     hits.push({
                       id: Buffer.from(full).toString("base64url"),
@@ -8354,6 +8407,7 @@ export default defineConfig({
           // provenance the filesystem can't: which agent, which session, and
           // the prompt that asked for it.
           type LedgerEntry = {
+            references?: unknown;
             ts: number;
             path: string;
             agent: string;
@@ -8498,6 +8552,1494 @@ export default defineConfig({
             }
           });
 
+          // ── Studio: mode system prompts ─────────────────────────────────
+          // Every Studio mode is driven by a "system beast" — the complete
+          // written design system for that output format, kept as markdown on
+          // disk so the dashboard, Claude Code and Hermes all read the same
+          // document. Editing it in the app IS changing the designer.
+          const designModesDir = () => join(homedir(), ".claude-os", "design", "modes");
+          // First run seeds the carousel beast from the proven build on the
+          // Desktop (the design-loop winner) rather than shipping a blank page.
+          const CAROUSEL_BEAST_SEEDS = [
+            join(homedir(), "Desktop", "ai-tools-carousel", "design-system.md"),
+            join(homedir(), "Desktop", "ai-tools-carousel", "bar.md"),
+          ];
+          function readModeBeast(id: string): string | null {
+            const file = join(designModesDir(), `${id}.md`);
+            try {
+              return readFileSync(file, "utf-8");
+            } catch {
+              /* not written yet — maybe seedable */
+            }
+            if (id === "carousel") {
+              const parts: string[] = [];
+              for (const seed of CAROUSEL_BEAST_SEEDS) {
+                try {
+                  parts.push(readFileSync(seed, "utf-8"));
+                } catch {
+                  /* seed absent on this machine */
+                }
+              }
+              if (parts.length) {
+                const merged = parts.join("\n\n---\n\n");
+                try {
+                  mkdirSync(designModesDir(), { recursive: true });
+                  writeFileSync(file, merged);
+                } catch {
+                  /* disk refused — still serve the merged text */
+                }
+                return merged;
+              }
+            }
+            return null;
+          }
+
+          // GET /__design_modes — every carousel system on disk. A studio can
+          // hold several systems (a personal one, a client's, an experiment);
+          // each is one markdown document, and decks name the one they follow.
+          server.middlewares.use("/__design_modes", (req, res, next) => {
+            if (req.method !== "GET") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "loopback only" }));
+              return;
+            }
+            try {
+              // Seed the built-in carousel system if it has never been read.
+              readModeBeast("carousel");
+            } catch {
+              /* nothing to seed */
+            }
+            let files: string[] = [];
+            try {
+              files = readdirSync(designModesDir()).filter((f) => f.endsWith(".md"));
+            } catch {
+              /* no modes dir yet */
+            }
+            const modes = files.map((f) => {
+              const id = f.replace(/\.md$/, "");
+              const file = join(designModesDir(), f);
+              let text = "";
+              let updated = 0;
+              try {
+                text = readFileSync(file, "utf-8");
+                updated = statSync(file).mtimeMs;
+              } catch {
+                /* unreadable */
+              }
+              const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim();
+              const palette = Array.from(new Set(text.match(/#[0-9a-fA-F]{6}\b/g) ?? [])).slice(
+                0,
+                8,
+              );
+              return {
+                id,
+                name: heading ?? id.replace(/[-_]+/g, " "),
+                path: file,
+                bytes: text.length,
+                updated,
+                palette,
+              };
+            });
+            res.end(JSON.stringify({ ok: true, modes }));
+          });
+
+          server.middlewares.use("/__design_mode", (req, res, next) => {
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "loopback only" }));
+              return;
+            }
+            if (req.method === "GET") {
+              const url = new URL(req.url ?? "", "http://localhost");
+              const id = (url.searchParams.get("id") ?? "").replace(/[^a-z0-9-]/gi, "");
+              if (!id) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ ok: false, error: "missing id" }));
+                return;
+              }
+              const beast = readModeBeast(id);
+              res.end(
+                JSON.stringify({
+                  ok: true,
+                  id,
+                  beast: beast ?? "",
+                  exists: beast !== null,
+                  path: join(designModesDir(), `${id}.md`),
+                }),
+              );
+              return;
+            }
+            if (req.method === "POST") {
+              if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+                res.statusCode = 403;
+                res.end(JSON.stringify({ ok: false, error: "invalid token" }));
+                return;
+              }
+              let body = "";
+              req.on("data", (c) => (body += c));
+              req.on("end", () => {
+                try {
+                  const { id, beast, remove } = JSON.parse(body || "{}");
+                  // Deleting a system is just deleting its document. The
+                  // built-in one stays: decks reference it by name.
+                  if (typeof remove === "string" && remove) {
+                    const gone = remove.replace(/[^a-z0-9-]/gi, "");
+                    if (!gone || gone === "carousel") {
+                      res.statusCode = 400;
+                      res.end(
+                        JSON.stringify({ ok: false, error: "the built-in system can't be deleted" }),
+                      );
+                      return;
+                    }
+                    try {
+                      unlinkSync(join(designModesDir(), `${gone}.md`));
+                    } catch {
+                      /* already gone */
+                    }
+                    res.end(JSON.stringify({ ok: true, removed: gone }));
+                    return;
+                  }
+                  const clean = typeof id === "string" ? id.replace(/[^a-z0-9-]/gi, "") : "";
+                  if (!clean || typeof beast !== "string" || beast.length > 200_000) {
+                    res.statusCode = 400;
+                    res.end(JSON.stringify({ ok: false, error: "expected { id, beast<200KB }" }));
+                    return;
+                  }
+                  mkdirSync(designModesDir(), { recursive: true });
+                  writeFileSync(join(designModesDir(), `${clean}.md`), beast);
+                  res.end(JSON.stringify({ ok: true }));
+                } catch (e) {
+                  res.statusCode = 500;
+                  res.end(JSON.stringify({ ok: false, error: String(e) }));
+                }
+              });
+              return;
+            }
+            next();
+          });
+
+          // ── Studio: saved carousels ─────────────────────────────────────
+          // A carousel is data, not pixels: background paths plus the words,
+          // so the type stays live HTML until export. Seeded once from the
+          // ai-tools build so the studio opens on proof instead of a shell.
+          const carouselsFile = () => join(homedir(), ".claude-os", "design", "carousels.json");
+          // The byline printed across every slide. Empty unless the operator
+          // sets one — a stranger's deck must never carry someone else's name.
+          function designIdentity(): Record<string, unknown> {
+            try {
+              const cfg = JSON.parse(
+                readFileSync(join(homedir(), ".claude-os", "config.json"), "utf-8"),
+              );
+              const id = cfg?.design?.identity;
+              if (id && typeof id === "object") return id;
+            } catch {
+              /* no config yet */
+            }
+            return {
+              left: "",
+              center: "",
+              right: "",
+              ctaTl: null,
+              ctaTr: null,
+              microTitle: "",
+              microSub: "",
+            };
+          }
+
+          function seedCarousels(): unknown[] {
+            const dir = join(homedir(), "Desktop", "ai-tools-carousel");
+            const bg = (n: string) => join(dir, "backgrounds", n);
+            const logo = (n: string) => join(dir, "logos", n);
+            const render = (i: number) => join(dir, "renders", `slide-0${i}.png`);
+            if (!existsSync(join(dir, "backgrounds"))) return [];
+            const rail = true;
+            return [
+              {
+                id: "ai-tools",
+                name: "The Seven AI Tools",
+                identity: designIdentity(),
+                createdAt: "2026-08-08",
+                source: "design-loop winner — growithalex bar",
+                slides: [
+                  {
+                    kind: "cover",
+                    theme: "white",
+                    bg: bg("bg-01-cover.png"),
+                    l1: "the",
+                    l2: "seven",
+                    chipNum: "07",
+                    chipSym: "Ai",
+                    l3: "TOOLS",
+                    render: render(1),
+                  },
+                  {
+                    kind: "tool",
+                    theme: "white",
+                    bg: bg("bg-02-claude-code.png"),
+                    logo: logo("claude.svg"),
+                    logoH: 100,
+                    quiet: "agentic coding",
+                    loud: "Claude Code",
+                    face: "stix",
+                    sub: "ships whole projects",
+                    rail,
+                    render: render(2),
+                  },
+                  {
+                    kind: "tool",
+                    theme: "black",
+                    bg: bg("bg-03-chatgpt.png"),
+                    logo: logo("openai.svg"),
+                    quiet: "everyday assistant",
+                    loud: "ChatGPT",
+                    face: "baloo",
+                    sub: "daily thinking partner",
+                    rail,
+                    render: render(3),
+                  },
+                  {
+                    kind: "tool",
+                    theme: "white",
+                    bg: bg("bg-04-gemini.png"),
+                    logo: logo("gemini.svg"),
+                    quiet: "multimodal power",
+                    loud: "GEMINI",
+                    face: "archivo",
+                    sub: "sees, hears and reads everything",
+                    rail,
+                    render: render(4),
+                  },
+                  {
+                    kind: "tool",
+                    theme: "black",
+                    bg: bg("bg-05-cursor.png"),
+                    logo: logo("cursor.svg"),
+                    quiet: "ai code editor",
+                    loud: "CURSOR",
+                    face: "slab",
+                    sub: "autocompletes entire features",
+                    rail,
+                    render: render(5),
+                  },
+                  {
+                    kind: "tool",
+                    theme: "white",
+                    bg: bg("bg-06-hermes.png"),
+                    logo: logo("hermesagent.svg"),
+                    logoH: 104,
+                    quiet: "autonomous agent",
+                    loud: "HERMES",
+                    face: "archivo-ital",
+                    sub: "runs while you sleep",
+                    rail,
+                    render: render(6),
+                  },
+                  {
+                    kind: "tool",
+                    theme: "black",
+                    bg: bg("bg-07-elevenlabs.png"),
+                    logo: logo("elevenlabs.svg"),
+                    quiet: "ai voice",
+                    quietStyle: "serifital",
+                    loud: "Eleven",
+                    face: "playfair-ital",
+                    sub: "voices indistinguishable from real",
+                    rail,
+                    render: render(7),
+                  },
+                  {
+                    kind: "cta",
+                    theme: "white",
+                    bg: bg("bg-08-higgsfield-cta.png"),
+                    logo: logo("runway.svg"),
+                    kicker: "runway · ai video",
+                    comment: "comment",
+                    loud: "AI",
+                    sub: "for the full guide to all seven AI tools",
+                    cornerTl: ["My name's", "YOUR NAME"],
+                    cornerTr: ["Create", "SMARTER"],
+                    microTitle: "SUBSCRIBE TO YOUR CHANNEL",
+                    microSub: "so you don't build alone",
+                    microLogo: logo("youtube.svg"),
+                    render: render(8),
+                  },
+                ],
+              },
+            ];
+          }
+          function readCarousels(): unknown[] {
+            try {
+              const parsed = JSON.parse(readFileSync(carouselsFile(), "utf-8"));
+              if (Array.isArray(parsed)) return parsed;
+            } catch {
+              /* first run */
+            }
+            const seeded = seedCarousels();
+            if (seeded.length) {
+              try {
+                mkdirSync(join(homedir(), ".claude-os", "design"), { recursive: true });
+                writeFileSync(carouselsFile(), JSON.stringify(seeded, null, 2));
+              } catch {
+                /* serve unsaved */
+              }
+            }
+            return seeded;
+          }
+          server.middlewares.use("/__design_carousel", (req, res, next) => {
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "loopback only" }));
+              return;
+            }
+            if (req.method === "GET") {
+              res.end(JSON.stringify({ ok: true, carousels: readCarousels() }));
+              return;
+            }
+            if (req.method === "POST") {
+              if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+                res.statusCode = 403;
+                res.end(JSON.stringify({ ok: false, error: "invalid token" }));
+                return;
+              }
+              let body = "";
+              req.on("data", (c) => (body += c));
+              req.on("end", () => {
+                try {
+                  const { carousels } = JSON.parse(body || "{}");
+                  if (!Array.isArray(carousels) || JSON.stringify(carousels).length > 2_000_000) {
+                    res.statusCode = 400;
+                    res.end(
+                      JSON.stringify({
+                        ok: false,
+                        error: "expected { carousels: [...] } under 2MB",
+                      }),
+                    );
+                    return;
+                  }
+                  mkdirSync(join(homedir(), ".claude-os", "design"), { recursive: true });
+                  writeFileSync(carouselsFile(), JSON.stringify(carousels, null, 2));
+                  res.end(JSON.stringify({ ok: true }));
+                } catch (e) {
+                  res.statusCode = 500;
+                  res.end(JSON.stringify({ ok: false, error: String(e) }));
+                }
+              });
+              return;
+            }
+            next();
+          });
+
+          // ── Studio: headless GPT-5.6 authorship via the Codex CLI ───────
+          // The CLI boots configured MCP servers on start and the unauthed
+          // ones fail SLOWLY, so every call carries a hard timeout. Answer
+          // extraction: the reply sits between the last bare "codex" marker
+          // line and the "tokens used" accounting line.
+          server.middlewares.use("/__design_author", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req) || req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => {
+              body += c;
+              if (body.length > 32_000) req.destroy();
+            });
+            req.on("end", () => {
+              let prompt = "";
+              try {
+                prompt = String(JSON.parse(body || "{}").prompt ?? "").trim();
+              } catch {
+                /* handled below */
+              }
+              if (!prompt) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ ok: false, error: "missing prompt" }));
+                return;
+              }
+              const codexBin = designCliBin("codex");
+              if (!codexBin) {
+                res.statusCode = 503;
+                res.end(JSON.stringify({ ok: false, error: "Codex CLI not installed" }));
+                return;
+              }
+              execFile(
+                codexBin,
+                ["exec", "--skip-git-repo-check", "--sandbox", "read-only", prompt],
+                {
+                  timeout: 240_000,
+                  maxBuffer: 8 * 1024 * 1024,
+                  env: designChildEnv(),
+                  // No `shell` here, deliberately. The prompt is fully
+                  // user-controlled, and `shell: true` would join it into a
+                  // cmd.exe command string on Windows. argv-only keeps it
+                  // inert; the cost is that a .cmd shim can't drive this lane.
+                },
+                (err, stdout) => {
+                  const raw = String(stdout ?? "");
+                  // Between the LAST bare "codex" line and "tokens used".
+                  const lines = raw.split("\n");
+                  let start = -1;
+                  let end = lines.length;
+                  for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].trim() === "codex") start = i;
+                    if (start >= 0 && /^tokens used/i.test(lines[i].trim())) {
+                      end = i;
+                      break;
+                    }
+                  }
+                  const text =
+                    start >= 0
+                      ? lines
+                          .slice(start + 1, end)
+                          .join("\n")
+                          .trim()
+                      : raw.trim();
+                  if (err && !text) {
+                    res.statusCode = 502;
+                    res.end(
+                      JSON.stringify({
+                        ok: false,
+                        error:
+                          (err as NodeJS.ErrnoException).code === "ETIMEDOUT" || err.killed
+                            ? "GPT-5.6 timed out"
+                            : "Codex run failed",
+                      }),
+                    );
+                    return;
+                  }
+                  res.end(JSON.stringify({ ok: true, text }));
+                },
+              );
+            });
+          });
+
+          // ── Studio: publish a carousel through Blotato ──────────────────
+          // Staged and honest: each stage either succeeds or returns exactly
+          // which prerequisite is missing, so the button is always pressable
+          // and the answer is always specific. Only slides with a finished
+          // render publish — backgrounds are never a substitute for the deck.
+          const BLOTATO_API = "https://backend.blotato.com/v2";
+          async function blotatoFetch(key: string, path: string, init?: RequestInit) {
+            const r = await fetch(`${BLOTATO_API}${path}`, {
+              ...init,
+              headers: {
+                "blotato-api-key": key,
+                "Content-Type": "application/json",
+                ...(init?.headers ?? {}),
+              },
+            });
+            const body = await r.text();
+            let json: any = null;
+            try {
+              json = JSON.parse(body);
+            } catch {
+              /* non-JSON error body */
+            }
+            return { status: r.status, ok: r.ok, json, body };
+          }
+          server.middlewares.use("/__design_publish", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req) || req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => {
+              body += c;
+              if (body.length > 64_000) req.destroy();
+            });
+            req.on("end", async () => {
+              try {
+                const parsed = JSON.parse(body || "{}");
+                const carouselId = String(parsed.carouselId ?? "");
+                const platforms: string[] = Array.isArray(parsed.platforms)
+                  ? parsed.platforms.map(String)
+                  : [];
+                const caption = typeof parsed.caption === "string" ? parsed.caption : "";
+                if (!carouselId || !platforms.length) {
+                  res.statusCode = 400;
+                  res.end(
+                    JSON.stringify({ ok: false, error: "expected { carouselId, platforms }" }),
+                  );
+                  return;
+                }
+                const key = designApiKey("blotato");
+                if (!key) {
+                  res.statusCode = 428;
+                  res.end(
+                    JSON.stringify({ ok: false, stage: "key", error: "no Blotato key connected" }),
+                  );
+                  return;
+                }
+                const doc: any = (readCarousels() as any[]).find((c) => c?.id === carouselId);
+                if (!doc) {
+                  res.statusCode = 404;
+                  res.end(JSON.stringify({ ok: false, error: "carousel not found" }));
+                  return;
+                }
+                const renders: string[] = (doc.slides ?? [])
+                  .map((sl: any) => sl?.render)
+                  .filter((r2: unknown) => typeof r2 === "string" && existsSync(r2 as string));
+                if (renders.length !== (doc.slides ?? []).length || !renders.length) {
+                  res.statusCode = 409;
+                  res.end(
+                    JSON.stringify({
+                      ok: false,
+                      stage: "render",
+                      error:
+                        "this deck's type is still live HTML — no finished renders to post yet",
+                    }),
+                  );
+                  return;
+                }
+                // Stage: who's connected on the account.
+                const accounts = await blotatoFetch(key, "/users/me/accounts");
+                if (!accounts.ok) {
+                  res.statusCode = 502;
+                  res.end(
+                    JSON.stringify({
+                      ok: false,
+                      stage: "accounts",
+                      error: `Blotato accounts lookup failed (${accounts.status}): ${accounts.body.slice(0, 180)}`,
+                    }),
+                  );
+                  return;
+                }
+                const accountList: any[] = Array.isArray(accounts.json?.items)
+                  ? accounts.json.items
+                  : Array.isArray(accounts.json)
+                    ? accounts.json
+                    : [];
+                // Stage: media up. Local renders travel as data URLs.
+                const mediaUrls: string[] = [];
+                for (const file of renders) {
+                  const b64 = readFileSync(file).toString("base64");
+                  const up = await blotatoFetch(key, "/media", {
+                    method: "POST",
+                    body: JSON.stringify({ url: `data:image/png;base64,${b64}` }),
+                  });
+                  const url = up.json?.url ?? up.json?.publicUrl;
+                  if (!up.ok || !url) {
+                    res.statusCode = 502;
+                    res.end(
+                      JSON.stringify({
+                        ok: false,
+                        stage: "media",
+                        error: `slide upload failed (${up.status}): ${up.body.slice(0, 180)}`,
+                      }),
+                    );
+                    return;
+                  }
+                  mediaUrls.push(String(url));
+                }
+                // Stage: one post per selected platform that has an account.
+                const results: Array<{ platform: string; ok: boolean; detail: string }> = [];
+                for (const platform of platforms) {
+                  const account = accountList.find(
+                    (a) =>
+                      String(a?.platform ?? a?.targetType ?? "").toLowerCase() ===
+                      platform.toLowerCase(),
+                  );
+                  if (!account) {
+                    results.push({
+                      platform,
+                      ok: false,
+                      detail: "no account connected in Blotato",
+                    });
+                    continue;
+                  }
+                  const post = await blotatoFetch(key, "/posts", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      post: {
+                        accountId: account.id,
+                        target: { targetType: platform.toLowerCase() },
+                        content: {
+                          text: caption || doc.name,
+                          mediaUrls,
+                          platform: platform.toLowerCase(),
+                        },
+                      },
+                    }),
+                  });
+                  results.push({
+                    platform,
+                    ok: post.ok,
+                    detail: post.ok ? "queued" : `${post.status}: ${post.body.slice(0, 140)}`,
+                  });
+                }
+                res.end(
+                  JSON.stringify({
+                    ok: results.some((r2) => r2.ok),
+                    results,
+                    mediaUrls: mediaUrls.length,
+                  }),
+                );
+              } catch (e: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ ok: false, error: e?.message ?? String(e) }));
+              }
+            });
+          });
+
+          // ── Studio: imported design systems ─────────────────────────────
+          // A Claude Design export (zip with _ds_manifest.json + SKILL.md)
+          // becomes a preset: its tokens, fonts and component vocabulary ride
+          // along with every generation until switched off. The zip is kept
+          // whole so agents can read the full skill, not just the summary.
+          const designSystemsDir = () => join(homedir(), ".claude-os", "design", "systems");
+          function systemExample(dir: string): string | null {
+            try {
+              const html = readdirSync(join(dir, "unpacked")).find((f) => /\.html$/i.test(f));
+              return html ?? null;
+            } catch {
+              return null;
+            }
+          }
+          // Claude Design tags its specimen cards with an @dsCard comment on
+          // line 1. Walk the unpacked tree once and index them — these little
+          // pages ARE the beautiful system view, so the inspector renders
+          // them instead of re-describing them.
+          function systemCards(
+            dir: string,
+          ): { file: string; group: string; name: string; subtitle: string; viewport: string }[] {
+            const out: {
+              file: string;
+              group: string;
+              name: string;
+              subtitle: string;
+              viewport: string;
+            }[] = [];
+            const base = join(dir, "unpacked");
+            const stack = [""];
+            while (stack.length) {
+              const relDir = stack.pop()!;
+              let entries: string[] = [];
+              try {
+                entries = readdirSync(join(base, relDir));
+              } catch {
+                continue;
+              }
+              for (const e of entries) {
+                if (e === "node_modules" || e.startsWith(".")) continue;
+                const rel = relDir ? `${relDir}/${e}` : e;
+                let st;
+                try {
+                  st = statSync(join(base, rel));
+                } catch {
+                  continue;
+                }
+                if (st.isDirectory()) {
+                  if (out.length < 200) stack.push(rel);
+                  continue;
+                }
+                if (!/\.html$/i.test(e) || st.size > 400_000) continue;
+                let head = "";
+                try {
+                  head = readFileSync(join(base, rel), "utf-8").slice(0, 500);
+                } catch {
+                  continue;
+                }
+                const tag = head.match(/<!--\s*@dsCard([^>]*)-->/i);
+                if (!tag) continue;
+                const attr = (name: string) =>
+                  tag[1].match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "";
+                out.push({
+                  file: rel,
+                  group: attr("group") || "Cards",
+                  name:
+                    attr("name") ||
+                    e
+                      .replace(/\.card\.html$|\.html$/i, "")
+                      .replace(/[-_]+/g, " "),
+                  subtitle: attr("subtitle"),
+                  viewport: attr("viewport") || "700x150",
+                });
+              }
+            }
+            return out;
+          }
+          function readDesignSystems(): unknown[] {
+            try {
+              return readdirSync(designSystemsDir())
+                .map((d) => {
+                  const dir = join(designSystemsDir(), d);
+                  try {
+                    const summary = JSON.parse(readFileSync(join(dir, "system.json"), "utf-8"));
+                    let changed = false;
+                    if (!summary.example) {
+                      const ex = systemExample(dir);
+                      if (ex) {
+                        summary.example = ex;
+                        changed = true;
+                      }
+                    }
+                    if (!Array.isArray(summary.cards) || summary.cards.length === 0) {
+                      const found = systemCards(dir);
+                      if (found.length || !Array.isArray(summary.cards)) {
+                        summary.cards = found;
+                        changed = true;
+                      }
+                    }
+                    if (changed) {
+                      try {
+                        writeFileSync(join(dir, "system.json"), JSON.stringify(summary, null, 2));
+                      } catch {
+                        /* serve unsaved */
+                      }
+                    }
+                    return summary;
+                  } catch {
+                    return null;
+                  }
+                })
+                .filter(Boolean);
+            } catch {
+              return [];
+            }
+          }
+          // /__design_system_asset/<id>/<path…> — the unpacked zip as a tree.
+          // The specimen cards Claude Design ships are small HTML files that
+          // link ../styles.css and _ds_bundle.js relatively; only a path-baseD
+          // route lets those resolve, so the inspector shows the REAL cards.
+          server.middlewares.use("/__design_system_asset", (req, res, next) => {
+            if (req.method !== "GET") return next();
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end("loopback only");
+              return;
+            }
+            try {
+              const parts = decodeURIComponent((req.url ?? "").split("?")[0])
+                .split("/")
+                .filter(Boolean);
+              const id = (parts.shift() ?? "").replace(/[^a-z0-9-]/gi, "");
+              const rel = parts.join("/");
+              const base = join(designSystemsDir(), id, "unpacked");
+              const real = realpathSync(resolve(join(base, rel)));
+              if (!id || !rel || !real.startsWith(realpathSync(base))) {
+                res.statusCode = 403;
+                res.end("forbidden");
+                return;
+              }
+              const ext = real.split(".").pop()?.toLowerCase() ?? "";
+              const mime =
+                ({
+                  html: "text/html; charset=utf-8",
+                  css: "text/css",
+                  js: "text/javascript",
+                  json: "application/json",
+                  svg: "image/svg+xml",
+                  png: "image/png",
+                  jpg: "image/jpeg",
+                  jpeg: "image/jpeg",
+                  webp: "image/webp",
+                  gif: "image/gif",
+                  woff: "font/woff",
+                  woff2: "font/woff2",
+                  ttf: "font/ttf",
+                } as Record<string, string>)[ext] ?? "application/octet-stream";
+              res.setHeader("Content-Type", mime);
+              res.setHeader("X-Content-Type-Options", "nosniff");
+              if (ext === "html" || ext === "svg")
+                res.setHeader(
+                  "Content-Security-Policy",
+                  "sandbox allow-scripts; default-src 'none'; img-src * data: blob:; " +
+                    "style-src 'unsafe-inline' * ; script-src 'unsafe-inline' * ; " +
+                    "font-src * data:; connect-src 'none'; form-action 'none'",
+                );
+              res.end(readFileSync(real));
+            } catch {
+              res.statusCode = 404;
+              res.end("not found");
+            }
+          });
+
+          // Serve one file from a system's unpacked zip, CSP-sandboxed — the
+          // inspector uses it to show the system's own example page live.
+          server.middlewares.use("/__design_system_file", (req, res, next) => {
+            if (req.method !== "GET") return next();
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end("loopback only");
+              return;
+            }
+            try {
+              const url = new URL(req.url ?? "", "http://localhost");
+              const id = (url.searchParams.get("id") ?? "").replace(/[^a-z0-9-]/gi, "");
+              const f = (url.searchParams.get("f") ?? "").replace(/\.\./g, "");
+              const base = join(designSystemsDir(), id, "unpacked");
+              const real = realpathSync(resolve(join(base, f)));
+              if (!id || !f || !real.startsWith(realpathSync(base))) {
+                res.statusCode = 403;
+                res.end("forbidden");
+                return;
+              }
+              const ext = real.split(".").pop()?.toLowerCase() ?? "";
+              const mime =
+                (
+                  {
+                    html: "text/html; charset=utf-8",
+                    css: "text/css",
+                    js: "text/javascript",
+                    svg: "image/svg+xml",
+                    png: "image/png",
+                    jpg: "image/jpeg",
+                    jpeg: "image/jpeg",
+                    webp: "image/webp",
+                  } as Record<string, string>
+                )[ext] ?? "application/octet-stream";
+              res.setHeader("Content-Type", mime);
+              res.setHeader("X-Content-Type-Options", "nosniff");
+              if (ext === "html" || ext === "svg")
+                res.setHeader(
+                  "Content-Security-Policy",
+                  "sandbox allow-scripts; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline' 'self'; script-src 'unsafe-inline' 'self'; font-src 'self' data:",
+                );
+              res.end(readFileSync(real));
+            } catch {
+              res.statusCode = 404;
+              res.end("not found");
+            }
+          });
+          server.middlewares.use("/__design_system", (req, res, next) => {
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "loopback only" }));
+              return;
+            }
+            if (req.method === "GET") {
+              const url = new URL(req.url ?? "", "http://localhost");
+              if (url.searchParams.get("scan") === "1") {
+                // Auto-detect: any zip in the usual landing spots that carries
+                // a Claude Design manifest. Names only — nothing is imported
+                // until the user says so.
+                const spots = [shellFolder("Downloads"), shellFolder("Desktop")];
+                const found: Array<{ path: string; name: string; mtime: number }> = [];
+                for (const spot of spots) {
+                  let entries: string[] = [];
+                  try {
+                    entries = readdirSync(spot).filter((f) => /\.zip$/i.test(f));
+                  } catch {
+                    continue;
+                  }
+                  for (const f of entries.slice(0, 200)) {
+                    const full = join(spot, f);
+                    try {
+                      const st = statSync(full);
+                      if (!st.isFile() || st.size > 300_000_000) continue;
+                      const fd = openSync(full, "r");
+                      const tailLen = Math.min(st.size, 512 * 1024);
+                      const tail = Buffer.alloc(tailLen);
+                      readSync(fd, tail, 0, tailLen, st.size - tailLen);
+                      closeSync(fd);
+                      if (tail.includes("_ds_manifest.json")) {
+                        found.push({
+                          path: full,
+                          name: f.replace(/\.zip$/i, "").replace(/\s*\(\d+\)\s*$/, ""),
+                          mtime: st.mtimeMs,
+                        });
+                      }
+                    } catch {
+                      /* unreadable zip — skip */
+                    }
+                  }
+                }
+                found.sort((a, b) => b.mtime - a.mtime);
+                res.end(JSON.stringify({ ok: true, found: found.slice(0, 10) }));
+                return;
+              }
+              res.end(JSON.stringify({ ok: true, systems: readDesignSystems() }));
+              return;
+            }
+            if (req.method !== "POST") return next();
+            if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "invalid token" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => {
+              body += c;
+              if (body.length > 96_000_000) req.destroy();
+            });
+            req.on("end", () => {
+              try {
+                const { name, zipBase64, importPath, remove, rename, create } = JSON.parse(
+                  body || "{}",
+                );
+                // Rename: the folder id stays put (projects reference it);
+                // only the label the operator reads changes.
+                if (rename && typeof rename === "object") {
+                  const clean = String(rename.id ?? "").replace(/[^a-z0-9-]/gi, "");
+                  const file = join(designSystemsDir(), clean, "system.json");
+                  if (!clean || !existsSync(file)) {
+                    res.statusCode = 404;
+                    res.end(JSON.stringify({ ok: false, error: "unknown system" }));
+                    return;
+                  }
+                  const summary = JSON.parse(readFileSync(file, "utf-8"));
+                  summary.name = String(rename.name ?? summary.name).slice(0, 90).trim();
+                  writeFileSync(file, JSON.stringify(summary, null, 2));
+                  res.end(JSON.stringify({ ok: true, system: summary }));
+                  return;
+                }
+                // Create an empty system: a real folder Claude can fill in
+                // later, so "New system" isn't a dead menu item.
+                if (create && typeof create === "object") {
+                  const label = String(create.name ?? "").trim().slice(0, 90) || "New system";
+                  const id = `${label
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, "-")
+                    .replace(/^-|-$/g, "")
+                    .slice(0, 40)}-${Date.now().toString(36)}`;
+                  const dir = join(designSystemsDir(), id);
+                  mkdirSync(join(dir, "unpacked"), { recursive: true });
+                  const summary = {
+                    id,
+                    name: label,
+                    namespace: null,
+                    colors: Array.isArray(create.colors)
+                      ? create.colors
+                          .slice(0, 24)
+                          .map((c: any) => ({ name: String(c?.name ?? ""), value: String(c?.value ?? "") }))
+                          .filter((c: any) => /^#[0-9a-f]{6}$/i.test(c.value))
+                      : [],
+                    fonts: Array.isArray(create.fonts)
+                      ? create.fonts.slice(0, 8).map((f: any) => String(f))
+                      : [],
+                    themes: [],
+                    components: [],
+                    skill: String(create.notes ?? "").slice(0, 4000),
+                    addedAt: new Date().toISOString().slice(0, 10),
+                    path: dir,
+                    example: null,
+                    cards: [],
+                    origin: "authored",
+                  };
+                  writeFileSync(join(dir, "system.json"), JSON.stringify(summary, null, 2));
+                  res.end(JSON.stringify({ ok: true, system: summary }));
+                  return;
+                }
+                if (typeof remove === "string" && remove) {
+                  const clean = remove.replace(/[^a-z0-9-]/gi, "");
+                  const target = join(designSystemsDir(), clean);
+                  if (clean && existsSync(join(target, "system.json"))) {
+                    rmSync(target, { recursive: true, force: true });
+                    res.end(JSON.stringify({ ok: true, removed: clean }));
+                  } else {
+                    res.statusCode = 404;
+                    res.end(JSON.stringify({ ok: false, error: "unknown system" }));
+                  }
+                  return;
+                }
+                let zipBuf: Buffer | null = null;
+                if (typeof importPath === "string" && importPath) {
+                  // Only zips under the user's home — same containment idea
+                  // as every other path this server accepts.
+                  const real = realpathSync(resolve(importPath));
+                  if (!real.startsWith(realpathSync(homedir()))) {
+                    res.statusCode = 403;
+                    res.end(JSON.stringify({ ok: false, error: "path outside home" }));
+                    return;
+                  }
+                  zipBuf = readFileSync(real);
+                } else if (typeof zipBase64 === "string" && zipBase64) {
+                  zipBuf = Buffer.from(zipBase64, "base64");
+                }
+                if (!zipBuf) {
+                  res.statusCode = 400;
+                  res.end(
+                    JSON.stringify({
+                      ok: false,
+                      error: "expected { name, zipBase64 | importPath }",
+                    }),
+                  );
+                  return;
+                }
+                const id = `${String(name || "system")
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, "-")
+                  .replace(/^-|-$/g, "")
+                  .slice(0, 40)}-${Date.now().toString(36)}`;
+                const dir = join(designSystemsDir(), id);
+                mkdirSync(join(dir, "unpacked"), { recursive: true });
+                const zipPath = join(dir, "system.zip");
+                writeFileSync(zipPath, zipBuf);
+                // argv-form unzip — never a shell string built from paths.
+                // tar.exe ships on Windows 10+ and reads zips; unzip does not
+                // exist there, so its ENOENT would be the message the user saw.
+                const unpackDir = join(dir, "unpacked");
+                const psQuote = (v: string) => v.replace(/'/g, "''");
+                const chain: Array<[string, string[]]> = [
+                  ["tar", ["-xf", zipPath, "-C", unpackDir]],
+                  IS_WIN
+                    ? [
+                        "powershell",
+                        [
+                          "-NoProfile",
+                          "-NonInteractive",
+                          "-Command",
+                          `Expand-Archive -LiteralPath '${psQuote(zipPath)}' -DestinationPath '${psQuote(unpackDir)}' -Force`,
+                        ],
+                      ]
+                    : ["unzip", ["-o", "-q", zipPath, "-d", unpackDir]],
+                ];
+                let unpacked = false;
+                const attempts: string[] = [];
+                for (const [bin, args] of chain) {
+                  try {
+                    execFileSync(bin, args, {
+                      timeout: 60_000,
+                      maxBuffer: 8 * 1024 * 1024,
+                      stdio: "ignore",
+                    });
+                    unpacked = true;
+                    break;
+                  } catch (e: any) {
+                    attempts.push(
+                      `${bin}: ${e?.code === "ENOENT" ? "not installed" : String(e?.message ?? "failed").slice(0, 120)}`,
+                    );
+                  }
+                }
+                if (!unpacked) throw new Error(`Could not unpack the zip — ${attempts.join("; ")}`);
+                let manifest: any = null;
+                try {
+                  manifest = JSON.parse(
+                    readFileSync(join(dir, "unpacked", "_ds_manifest.json"), "utf-8"),
+                  );
+                } catch {
+                  /* not a Claude Design export — still usable as a raw skill */
+                }
+                let skill = "";
+                try {
+                  skill = readFileSync(join(dir, "unpacked", "SKILL.md"), "utf-8").slice(0, 4000);
+                } catch {
+                  /* optional */
+                }
+                const colors = (manifest?.tokens ?? [])
+                  .filter((t: any) => t?.kind === "color" && typeof t?.value === "string")
+                  .slice(0, 24)
+                  .map((t: any) => ({ name: String(t.name), value: String(t.value) }));
+                const summary = {
+                  id,
+                  name: String(name || manifest?.namespace || "Design system"),
+                  namespace: manifest?.namespace ?? null,
+                  colors,
+                  fonts: (manifest?.brandFonts ?? [])
+                    .map((f: any) => String(f?.family))
+                    .filter(Boolean),
+                  themes: (manifest?.themes ?? [])
+                    .map((t: any) => String(t?.label))
+                    .filter(Boolean),
+                  components: (manifest?.components ?? [])
+                    .map((c: any) => (typeof c === "string" ? c : String(c?.name ?? "")))
+                    .filter(Boolean),
+                  skill,
+                  addedAt: new Date().toISOString().slice(0, 10),
+                  path: dir,
+                  // Index the specimen pages NOW — the client renders this
+                  // response directly, so an unindexed import reads as an
+                  // empty system even when the pages are all on disk.
+                  example: systemExample(dir),
+                  cards: systemCards(dir),
+                };
+                writeFileSync(join(dir, "system.json"), JSON.stringify(summary, null, 2));
+                res.end(JSON.stringify({ ok: true, system: summary }));
+              } catch (e: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ ok: false, error: e?.message ?? String(e) }));
+              }
+            });
+          });
+
+          // ── Studio: design projects ─────────────────────────────────────
+          // Everything the Design room builds lands here as a project: the
+          // full HTML plus a meta row. Served back under a CSP sandbox, so a
+          // generated page can run its own script without touching the
+          // dashboard's origin — same rule as agent-written documents.
+          const designProjectsDir = () => join(shellFolder("Desktop"), "designs");
+          function readDesignProjects(): unknown[] {
+            try {
+              return readdirSync(designProjectsDir())
+                .map((d) => {
+                  const dir = join(designProjectsDir(), d);
+                  const page = join(dir, "index.html");
+                  if (!existsSync(page)) return null;
+                  try {
+                    return JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8"));
+                  } catch {
+                    // A folder someone made by hand still belongs on the wall.
+                    try {
+                      const st = statSync(page);
+                      return {
+                        id: d,
+                        name: d.replace(/[-_]+/g, " "),
+                        format: "page",
+                        model: "external",
+                        system: null,
+                        ts: st.mtimeMs,
+                      };
+                    } catch {
+                      return null;
+                    }
+                  }
+                })
+                .filter(Boolean)
+                .sort((a: any, b: any) => (b?.ts ?? 0) - (a?.ts ?? 0));
+            } catch {
+              return [];
+            }
+          }
+          server.middlewares.use("/__design_project_file", (req, res, next) => {
+            if (req.method !== "GET") return next();
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end("loopback only");
+              return;
+            }
+            try {
+              const url = new URL(req.url ?? "", "http://localhost");
+              const raw = url.searchParams.get("id") ?? "";
+              const id = raw.replace(/[^a-z0-9 _.-]/gi, "").replace(/\.\./g, "");
+              const file = join(designProjectsDir(), id, "index.html");
+              if (!id || !existsSync(file)) {
+                res.statusCode = 404;
+                res.end("not found");
+                return;
+              }
+              res.setHeader("Content-Type", "text/html; charset=utf-8");
+              res.setHeader("X-Content-Type-Options", "nosniff");
+              res.setHeader(
+                "Content-Security-Policy",
+                "sandbox allow-scripts; default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:",
+              );
+              res.end(readFileSync(file));
+            } catch {
+              res.statusCode = 500;
+              res.end("read failed");
+            }
+          });
+          server.middlewares.use("/__design_project", (req, res, next) => {
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "loopback only" }));
+              return;
+            }
+            if (req.method === "GET") {
+              res.end(
+                JSON.stringify({ ok: true, dir: designProjectsDir(), projects: readDesignProjects() }),
+              );
+              return;
+            }
+            if (req.method !== "POST") return next();
+            if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "invalid token" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => {
+              body += c;
+              if (body.length > 8_000_000) req.destroy();
+            });
+            req.on("end", () => {
+              try {
+                const { name, format, html, model, system, remove, annotate } = JSON.parse(
+                  body || "{}",
+                );
+                if (annotate && typeof annotate === "object") {
+                  const cleanId = String(annotate.id ?? "").replace(/[^a-z0-9 _.-]/gi, "");
+                  const dir = join(designProjectsDir(), cleanId);
+                  if (!cleanId || !existsSync(join(dir, "index.html"))) {
+                    res.statusCode = 404;
+                    res.end(JSON.stringify({ ok: false, error: "no such project" }));
+                    return;
+                  }
+                  const meta = {
+                    id: cleanId,
+                    name: String(annotate.name ?? cleanId).slice(0, 140),
+                    format: String(annotate.format ?? "page"),
+                    model: String(annotate.model ?? "Claude"),
+                    system: annotate.system ? String(annotate.system) : null,
+                    ts: Date.now(),
+                  };
+                  writeFileSync(join(dir, "meta.json"), JSON.stringify(meta, null, 2));
+                  res.end(JSON.stringify({ ok: true, project: meta }));
+                  return;
+                }
+                if (typeof remove === "string" && remove) {
+                  const clean = remove.replace(/[^a-z0-9 _.-]/gi, "").replace(/\.\./g, "");
+                  const dir = join(designProjectsDir(), clean);
+                  if (clean && existsSync(join(dir, "index.html"))) {
+                    // Projects have vanished without explanation — every
+                    // delete is now on the record with who asked.
+                    try {
+                      appendFileSync(
+                        join(homedir(), ".claude-os", "design", "audit.log"),
+                        `${new Date().toISOString()} remove-project ${clean} ua=${req.headers["user-agent"] ?? "?"}\n`,
+                      );
+                    } catch {
+                      /* never block the delete on the log */
+                    }
+                    rmSync(dir, { recursive: true, force: true });
+                    res.end(JSON.stringify({ ok: true, removed: clean }));
+                  } else {
+                    res.statusCode = 404;
+                    res.end(JSON.stringify({ ok: false, error: "unknown project" }));
+                  }
+                  return;
+                }
+                if (typeof html !== "string" || !html.trim() || html.length > 4_000_000) {
+                  res.statusCode = 400;
+                  res.end(
+                    JSON.stringify({ ok: false, error: "expected { name, format, html<4MB }" }),
+                  );
+                  return;
+                }
+                const id = `${String(name || "design")
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, "-")
+                  .replace(/^-|-$/g, "")
+                  .slice(0, 48)}-${Date.now().toString(36)}`;
+                const dir = join(designProjectsDir(), id);
+                mkdirSync(dir, { recursive: true });
+                writeFileSync(join(dir, "index.html"), html);
+                const meta = {
+                  id,
+                  name: String(name || "Untitled").slice(0, 140),
+                  format: String(format || "page"),
+                  model: String(model || "Claude"),
+                  system: system ? String(system) : null,
+                  ts: Date.now(),
+                };
+                writeFileSync(join(dir, "meta.json"), JSON.stringify(meta, null, 2));
+                res.end(JSON.stringify({ ok: true, project: meta }));
+              } catch (e: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ ok: false, error: e?.message ?? String(e) }));
+              }
+            });
+          });
+
+
+          // ── Studio: which maker lanes are signed in on THIS machine ─────
+          server.middlewares.use("/__design_makers", (req, res, next) => {
+            if (req.method !== "GET") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false }));
+              return;
+            }
+            const geminiBin =
+              resolveCliBin("gemini") ??
+              (existsSync(join(homedir(), ".nvm")) ? "nvm-managed" : null);
+            res.end(
+              JSON.stringify({
+                ok: true,
+                makers: {
+                  claude: { ok: true, note: "your Claude plan" },
+                  codex: {
+                    ok: existsSync(join(homedir(), ".codex", "auth.json")),
+                    note: "ChatGPT sign-in",
+                  },
+                  gemini: {
+                    ok: Boolean(geminiBin) || existsSync(join(homedir(), ".gemini")),
+                    note: "Gemini CLI",
+                  },
+                  antigravity: {
+                    ok: existsSync("/Applications/Antigravity.app"),
+                    note: "IDE install",
+                  },
+                  openrouter: {
+                    ok: Boolean(designApiKey("openrouter")),
+                    note: "routes the open catalog",
+                  },
+                },
+              }),
+            );
+          });
+
+
+          // POST /__design_export — a deck leaves the room with no account
+          // anywhere: the finished renders when they exist, otherwise the
+          // backgrounds plus the live compositor, written into a project
+          // folder so it lands on the Design wall and opens in a browser.
+          server.middlewares.use("/__design_export", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req) || req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+              return;
+            }
+            let body = "";
+            req.on("data", (c) => {
+              body += c;
+              if (body.length > 4_000_000) req.destroy();
+            });
+            req.on("end", () => {
+              try {
+                const { carouselId, html } = JSON.parse(body || "{}");
+                const list = readCarousels() as Array<{ id: string; name: string; slides: any[] }>;
+                const doc = list.find((c) => c.id === carouselId);
+                if (!doc) {
+                  res.statusCode = 404;
+                  res.end(JSON.stringify({ ok: false, error: "unknown carousel" }));
+                  return;
+                }
+                const slug = `${String(doc.name)
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, "-")
+                  .replace(/^-|-$/g, "")
+                  .slice(0, 46)}-deck`;
+                const dir = join(designProjectsDir(), slug);
+                mkdirSync(join(dir, "images"), { recursive: true });
+                // Copy every image the deck references, rewriting the paths
+                // so the exported folder is self-contained and portable.
+                const copied = new Map<string, string>();
+                let n = 0;
+                for (const sl of doc.slides) {
+                  for (const key of ["bg", "logo", "microLogo"]) {
+                    const src = sl?.[key];
+                    if (typeof src !== "string" || !src || copied.has(src)) continue;
+                    try {
+                      const ext = (src.split(".").pop() ?? "png").toLowerCase().slice(0, 4);
+                      const name = `${String(++n).padStart(2, "0")}-${key}.${ext}`;
+                      copyFileSync(src, join(dir, "images", name));
+                      copied.set(src, `images/${name}`);
+                    } catch {
+                      /* a missing asset must not abort the whole export */
+                    }
+                  }
+                }
+                let page = typeof html === "string" ? html : "";
+                // The studio renders images through /__design_file?id=<b64url>,
+                // which dies the moment the dev server stops. Inline every
+                // picture as a data URI so the saved page is ONE file that
+                // works from a folder, an email, or a sandboxed preview —
+                // the copies in images/ stay for reuse and editing.
+                const mimeOf = (f: string) =>
+                  ({
+                    png: "image/png",
+                    jpg: "image/jpeg",
+                    jpeg: "image/jpeg",
+                    webp: "image/webp",
+                    gif: "image/gif",
+                    svg: "image/svg+xml",
+                  })[f.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+                for (const [abs] of copied) {
+                  let inlined: string;
+                  try {
+                    inlined = `data:${mimeOf(abs)};base64,${readFileSync(abs).toString("base64")}`;
+                  } catch {
+                    continue;
+                  }
+                  const id = Buffer.from(abs).toString("base64url");
+                  page = page
+                    .split(`/__design_file?id=${encodeURIComponent(id)}`)
+                    .join(inlined)
+                    .split(`/__design_file?id=${id}`)
+                    .join(inlined)
+                    .split(abs)
+                    .join(inlined);
+                }
+                writeFileSync(join(dir, "index.html"), page || "<!doctype html><title>deck</title>");
+                writeFileSync(
+                  join(dir, "meta.json"),
+                  JSON.stringify(
+                    {
+                      id: slug,
+                      name: `${doc.name} — deck`,
+                      format: "poster",
+                      model: "Carousel studio",
+                      system: null,
+                      ts: Date.now(),
+                    },
+                    null,
+                    2,
+                  ),
+                );
+                res.end(
+                  JSON.stringify({ ok: true, dir, slides: doc.slides.length, assets: copied.size }),
+                );
+              } catch (e: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ ok: false, error: e?.message ?? String(e) }));
+              }
+            });
+          });
+
+
+          // /__design_project_asset/<id>/<path…> — a project served as a tree.
+          // Exported decks reference their images relatively, so a page-only
+          // route leaves every picture broken; this makes the wall preview
+          // show exactly what the folder shows on disk.
+          server.middlewares.use("/__design_project_asset", (req, res, next) => {
+            if (req.method !== "GET") return next();
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end("loopback only");
+              return;
+            }
+            try {
+              const parts = decodeURIComponent((req.url ?? "").split("?")[0])
+                .split("/")
+                .filter(Boolean);
+              const id = (parts.shift() ?? "").replace(/[^a-z0-9 _.-]/gi, "").replace(/\.\./g, "");
+              const rel = parts.join("/") || "index.html";
+              const base = join(designProjectsDir(), id);
+              const real = realpathSync(resolve(join(base, rel)));
+              if (!id || !real.startsWith(realpathSync(base))) {
+                res.statusCode = 403;
+                res.end("forbidden");
+                return;
+              }
+              const ext = real.split(".").pop()?.toLowerCase() ?? "";
+              const mime =
+                ({
+                  html: "text/html; charset=utf-8",
+                  css: "text/css",
+                  js: "text/javascript",
+                  json: "application/json",
+                  svg: "image/svg+xml",
+                  png: "image/png",
+                  jpg: "image/jpeg",
+                  jpeg: "image/jpeg",
+                  webp: "image/webp",
+                  gif: "image/gif",
+                  mp4: "video/mp4",
+                  woff2: "font/woff2",
+                } as Record<string, string>)[ext] ?? "application/octet-stream";
+              res.setHeader("Content-Type", mime);
+              res.setHeader("X-Content-Type-Options", "nosniff");
+              if (ext === "html" || ext === "svg")
+                res.setHeader(
+                  "Content-Security-Policy",
+                  "sandbox allow-scripts; default-src 'none'; img-src * data: blob:; " +
+                    "media-src * data: blob:; " +
+                    "style-src 'unsafe-inline' * ; script-src 'unsafe-inline' * ; " +
+                    "font-src * data:; connect-src 'none'; form-action 'none'",
+                );
+              res.end(readFileSync(real));
+            } catch {
+              res.statusCode = 404;
+              res.end("not found");
+            }
+          });
+
           // GET /__design_skills — the generation skills installed for each
           // agent, so the Create tab can offer "pick a skill, write the ask"
           // instead of a bare prompt box pretending to be Claude Design.
@@ -8525,7 +10067,9 @@ export default defineConfig({
                 // descriptions long enough that a small head-slice cuts the
                 // closing --- off and silently drops the skill.
                 const head = readFileSync(file, "utf-8").slice(0, 8000);
-                const m = head.match(/^---\n([\s\S]*?)\n---/);
+                // Git checks out CRLF on Windows by default; a strict \n here
+            // silently drops every skill and empties the Create tab.
+            const m = head.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
                 if (!m) return { name: null, description: null };
                 const pick = (key: string) => {
                   const mm = m[1].match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
@@ -8613,7 +10157,7 @@ export default defineConfig({
           const DESIGN_KEY_FILES = [
             join(homedir(), ".hermes", ".env"),
             join(homedir(), ".claude-os", ".env.local"),
-            join(homedir(), ".config", "jack-keys.env"),
+            join(homedir(), ".config", "ai-keys.env"),
           ];
           // Every engine Design can generate through. Key-auth engines resolve
           // their key from config.json -> env -> the dotenv haunts; Higgsfield
@@ -8624,6 +10168,9 @@ export default defineConfig({
             fal: "FAL_KEY",
             replicate: "REPLICATE_API_TOKEN",
             openai: "OPENAI_API_KEY",
+            // Not a generation engine — the distribution rail. Keyed the same
+            // way so Connect/paste-a-key works without a parallel store.
+            blotato: "BLOTATO_API_KEY",
           };
           type DesignKeySource = "settings" | "environment" | "key_file" | null;
           function designApiKeyInfo(provider: string): {
@@ -10065,7 +11612,7 @@ export default defineConfig({
               const models: StudioModel[] = await Promise.all(
                 rows.map(async (m: any) => {
                   const id = String(m.id);
-                  let pricing: DesignPriceLine[] = [];
+                  const pricing: DesignPriceLine[] = [];
                   try {
                     const endpointPath =
                       typeof m?.endpoints === "string"
@@ -10407,7 +11954,10 @@ export default defineConfig({
                       ? null
                       : "That doesn't look like a fal key (expected id:secret)",
                 };
-                const problem = await verifiers[provider](trimmed);
+                // Not every provider has a probe; an unknown one must save,
+                // not throw "verifiers[provider] is not a function" at the user.
+                const verify = verifiers[provider];
+                const problem = verify ? await verify(trimmed) : null;
                 if (problem) {
                   res.statusCode = 400;
                   res.end(JSON.stringify({ error: problem }));
@@ -14229,7 +15779,7 @@ export default defineConfig({
       // destroys React state, and creates infinite scan/activate loops.
       // The app reads the file at import time; hot-reloading it mid-wizard
       // is actively harmful.
-      watch: { ignored: ["**/src/data/live-data.json"] },
+      watch: { ignored: ["**/src/data/live-data.json", "**/website-os/**", "**/public/website-os/**"] },
     },
   },
 });

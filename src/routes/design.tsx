@@ -38,6 +38,11 @@ import { cn } from "@/lib/utils";
 import claudeLogo from "@/assets/claude-logo.png";
 import hermesLogo from "@/assets/hermes-agent.png";
 import { BRANDS, BrandMark, brandForModel, MODEL_BLURBS } from "@/components/design-brands";
+import blotatoLogo from "@/assets/logos/blotato.webp";
+import codexLogo from "@/assets/logos/codex.png";
+import geminiLogo from "@/assets/logos/gemini-color.svg";
+import antigravityLogo from "@/assets/logos/antigravity.png";
+import openrouterLogo from "@/assets/logos/openrouter.png";
 
 export const Route = createFileRoute("/design")({
   component: DesignStudio,
@@ -174,7 +179,7 @@ type Engine = {
   models: EngineModel[];
 };
 
-type Look = { id: string; label: string; hint: string };
+type Look = { id: string; label: string; hint: string; prompt?: string; references?: LedgerItem[] };
 
 type ProvidersResponse = { ok: boolean; engines: Engine[]; looks: Look[]; error?: string };
 
@@ -287,6 +292,7 @@ const ENGINE_SETUP: Record<
 };
 
 function compactUsd(value: number): string {
+  if (!value) return "$0";
   if (value >= 1) return `$${value.toFixed(2)}`;
   if (value >= 0.01) return `$${value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
   if (value >= 0.0001) return `$${value.toFixed(5).replace(/0+$/, "").replace(/\.$/, "")}`;
@@ -942,7 +948,7 @@ function InsightsTab({ onOpenConnections }: { onOpenConnections: () => void }) {
 
 // ── page shell ─────────────────────────────────────────────────────────────
 
-type Tab = "create" | "library" | "insights";
+type Tab = "create" | "library" | "insights" | "studio";
 type LibrarySort = "relevance" | "newest" | "oldest" | "largest" | "smallest";
 
 type DesignQuote = { text: string; author: string };
@@ -1027,6 +1033,17 @@ function quoteForThisSession(): DesignQuote {
 
 function DesignStudio() {
   const [tab, setTab] = useState<Tab>("create");
+  const zoneRef = useRef<HTMLDivElement>(null);
+  const [isFull, setIsFull] = useState(false);
+  useEffect(() => {
+    const onFs = () => setIsFull(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void zoneRef.current?.requestFullscreen();
+  };
   const [designQuote] = useState(quoteForThisSession);
   const [refs, setRefs] = useState<LedgerItem[]>(() => {
     try {
@@ -1122,7 +1139,9 @@ function DesignStudio() {
               <p className="mt-3 max-w-2xl text-base leading-relaxed text-white/42">
                 {tab === "library"
                   ? "Find any visual on this machine without remembering the filename."
-                  : "See what Design has made, spent and still has available."}
+                  : tab === "insights"
+                    ? "See what Design has made, spent and still has available."
+                    : "Purpose-built rooms. Each one owns a format, end to end."}
               </p>
             )}
           </div>
@@ -1133,6 +1152,7 @@ function DesignStudio() {
                 { id: "create" as const, label: "Create", number: "01" },
                 { id: "library" as const, label: "Library", number: "02" },
                 { id: "insights" as const, label: "Insights", number: "03" },
+                { id: "studio" as const, label: "Studio", number: "04" },
               ].map((t) => {
                 const is = tab === t.id;
                 return (
@@ -1177,9 +1197,38 @@ function DesignStudio() {
               >
                 <Settings2 className="h-3.5 w-3.5" />
               </button>
+              <button
+                type="button"
+                onClick={toggleFull}
+                aria-label={isFull ? "Exit fullscreen" : "Fullscreen this room"}
+                title={isFull ? "Exit fullscreen (Esc)" : "Fullscreen"}
+                className="grid h-8 w-8 place-items-center rounded-[10px] border border-white/[0.08] bg-white/[0.025] text-white/35 transition-colors hover:border-white/[0.15] hover:bg-white/[0.06] hover:text-white/75"
+              >
+                {isFull ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </button>
             </div>
           </div>
         </div>
+
+        {/* every room lives inside this zone, so fullscreen works for all of them */}
+        <div
+          ref={zoneRef}
+          className="relative [&:fullscreen]:overflow-auto [&:fullscreen]:bg-[#11151f] [&:fullscreen]:p-6"
+        >
+          {isFull ? (
+            <button
+              type="button"
+              onClick={toggleFull}
+              className="fixed right-5 top-5 z-50 inline-flex items-center gap-2 rounded-full border border-white/[0.14] bg-black/60 px-4 py-2 text-[12px] font-semibold text-white/85 backdrop-blur transition-colors hover:bg-black/80"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+              Exit fullscreen
+            </button>
+          ) : null}
 
         <div className={tab === "create" ? "block" : "hidden"}>
           <CreateTab refs={refs} setRefs={setRefs} connectionsRequest={connectionsRequest} />
@@ -1189,6 +1238,10 @@ function DesignStudio() {
         </div>
         <div className={tab === "insights" ? "block" : "hidden"}>
           <InsightsTab onOpenConnections={openConnections} />
+        </div>
+        <div className={tab === "studio" ? "block" : "hidden"}>
+          <StudioTab active={tab === "studio"} />
+        </div>
         </div>
       </div>
     </div>
@@ -2379,7 +2432,10 @@ function Composer({
         }}
       />
       <div
-        className="design-spectrum-frame relative mx-auto max-w-[1160px] rounded-[24px] p-[1.5px]"
+        className={cn(
+          canGenerate ? "design-spectrum-live" : "design-spectrum-frame",
+          "relative mx-auto max-w-[1160px] rounded-[24px] p-[1.5px]",
+        )}
         style={{
           background:
             "linear-gradient(115deg, #ff7959 0%, #f4ca61 21%, #5cddc1 43%, #7694ff 66%, #d879ff 83%, #ff7959 100%)",
@@ -3325,7 +3381,7 @@ function StyleButton({
                           onClick={() => {
                             setEditingId(option.id);
                             setName(option.label);
-                            setInstructions(option.prompt);
+                            setInstructions(option.prompt ?? "");
                             setEditingReferences(option.references ?? []);
                             setAdding(true);
                           }}
@@ -4564,6 +4620,34 @@ function LibraryTab({ onUseAsReference }: { onUseAsReference: (item: MediaItem) 
       // makes individual cards flash in before the rest of the results.
       return Boolean(scored?.has(m.id));
     });
+    // The scan window is bounded (newest N files) but the search index
+    // remembers everything it has ever described. A hit the scan no longer
+    // carries is still a real file — synthesize its card from the hit
+    // itself, or older matches silently vanish and search looks broken.
+    if (q && activeHits) {
+      const present = new Set(filtered.map((m) => m.id));
+      for (const hit of activeHits) {
+        if (present.has(hit.id)) continue;
+        const name = hit.path.split(/[/\\]/).pop() ?? hit.path;
+        const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] ?? "").toLowerCase();
+        const hitKind: "image" | "video" = /^(mp4|mov|webm|m4v)$/.test(ext) ? "video" : "image";
+        if (kind !== "all" && hitKind !== kind) continue;
+        const folder = hit.path.split(/[/\\]/).slice(-2, -1)[0] ?? "";
+        if (project !== "all" && folder !== project) continue;
+        filtered.push({
+          id: hit.id,
+          path: hit.path,
+          name,
+          ext,
+          kind: hitKind,
+          bytes: 0,
+          mtime: 0,
+          project: folder,
+          root: "",
+        });
+        present.add(hit.id);
+      }
+    }
     return filtered.sort((a, b) => {
       if (sort === "relevance" && q) {
         const filenameScore = (item: MediaItem) =>
@@ -4699,7 +4783,7 @@ function LibraryTab({ onUseAsReference }: { onUseAsReference: (item: MediaItem) 
                 </span>
               </div>
               <p className="mt-1 text-[9.5px] leading-relaxed text-white/34">
-                Finds file changes and reads visible words locally. Nothing leaves this Mac.
+                Finds file changes and reads visible words locally. Nothing leaves this machine.
               </p>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[8.5px] text-white/29">
                 <span className="font-medium tabular-nums text-[#8ddfca]/65">
@@ -4855,12 +4939,18 @@ function LibraryTab({ onUseAsReference }: { onUseAsReference: (item: MediaItem) 
       ) : items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/60 p-16 text-center">
           <div className="text-sm text-foreground mb-1">
-            {searchPending ? "Searching your visuals…" : "Nothing matches"}
+            {searchPending
+              ? "Searching your visuals…"
+              : data?.total === 0
+                ? "No images or videos found yet"
+                : "Nothing matches"}
           </div>
           <div className="text-[12.5px] text-muted-foreground">
             {searchPending
               ? "Results will appear together when the search is ready."
-              : "Try clearing the filters. New image text is indexed automatically in the background."}
+              : data?.total === 0
+                ? "Design scans your Desktop, Documents and Downloads. Point it somewhere else with design.roots in ~/.claude-os/config.json."
+                : "Try clearing the filters. New image text is indexed automatically in the background."}
           </div>
         </div>
       ) : (
@@ -5125,5 +5215,3793 @@ function Lightbox({
         </div>
       </div>
     </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Studio — purpose-built rooms. Create is general; a Studio mode owns one
+// output format completely: its own surface, its own system document, its own
+// publish path. The system document ("the beast") is markdown on disk that
+// Claude Code and Hermes read too — editing it here IS changing the designer.
+// ════════════════════════════════════════════════════════════════════════════
+
+type StudioEngine = { id: string; label: string; configured: boolean };
+type StudioModel = {
+  id: string;
+  label: string;
+  kind: "image" | "video";
+  perImage?: number | null;
+  perUnit?: number | null;
+};
+
+// Studio preferences live in localStorage, not React state alone: a reload
+// mid-session should not throw away which model and system you had chosen.
+function useSticky<T>(key: string, initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(`claude-os.design.${key}`);
+      return raw === null ? initial : (JSON.parse(raw) as T);
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(`claude-os.design.${key}`, JSON.stringify(v));
+    } catch {
+      /* private mode — preference just won't persist */
+    }
+  }, [key, v]);
+  const set = useCallback<React.Dispatch<React.SetStateAction<T>>>((next) => setV(next), []);
+  return [v, set];
+}
+
+const studioToken = async () => (await (await fetch("/__token")).json()).token as string;
+
+// /__design_file wants the base64url of the absolute path. Manifest slides
+// store plain paths (readable, hand-editable JSON); encode at the edge.
+const slideFileUrl = (path: string) =>
+  fileUrl(btoa(path).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""));
+
+// The carousel type system — lifted verbatim from the design-loop winner so
+// the studio renders the same slides the bar approved. Loud faces perform the
+// word's personality; swapping faces between slides should feel wrong.
+const STUDIO_FONTS_HREF =
+  "https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Archivo+Black&family=Playfair+Display:ital,wght@0,700;0,800;1,700;1,800&family=Bebas+Neue&family=STIX+Two+Text:wght@700&family=Caveat:wght@700&family=Baloo+2:wght@800&family=Alfa+Slab+One&display=swap";
+
+function useStudioFonts(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    if (document.querySelector("link[data-studio-fonts]")) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = STUDIO_FONTS_HREF;
+    link.setAttribute("data-studio-fonts", "1");
+    document.head.appendChild(link);
+  }, [active]);
+}
+
+type CarouselSlide = {
+  kind: "cover" | "tool" | "cta";
+  theme: "white" | "black";
+  bg: string;
+  logo?: string;
+  logoH?: number;
+  quiet?: string;
+  quietStyle?: "sans" | "serifital";
+  loud?: string;
+  face?: string;
+  sub?: string;
+  rail?: boolean;
+  l1?: string;
+  l2?: string;
+  chipNum?: string;
+  chipSym?: string;
+  l3?: string;
+  kicker?: string;
+  comment?: string;
+  cornerTl?: [string, string];
+  cornerTr?: [string, string];
+  microTitle?: string;
+  microSub?: string;
+  microLogo?: string;
+};
+
+type CarouselIdentity = {
+  left: string;
+  center: string;
+  right: string;
+  ctaTl: [string, string] | null;
+  ctaTr: [string, string] | null;
+  microTitle: string;
+  microSub: string;
+};
+
+const EMPTY_IDENTITY: CarouselIdentity = {
+  left: "",
+  center: "",
+  right: "",
+  ctaTl: null,
+  ctaTr: null,
+  microTitle: "",
+  microSub: "",
+};
+
+type CarouselDoc = {
+  system?: string;
+  id: string;
+  name: string;
+  identity?: CarouselIdentity;
+  createdAt: string;
+  source?: string;
+  brief?: string;
+  assets?: string[];
+  slides: CarouselSlide[];
+};
+
+const LOUD_FACES: Record<string, React.CSSProperties> = {
+  stix: { font: "700 186px/0.96 'STIX Two Text'", letterSpacing: "-8px" },
+  baloo: { font: "800 238px/0.92 'Baloo 2'", letterSpacing: "-8px" },
+  archivo: {
+    font: "400 178px/0.95 'Archivo Black'",
+    letterSpacing: "26px",
+    transform: "scaleX(1.08)",
+    display: "inline-block",
+  },
+  slab: { font: "400 196px/0.95 'Alfa Slab One'", letterSpacing: "2px" },
+  "archivo-ital": {
+    font: "400 198px/0.92 'Archivo Black'",
+    transform: "skewX(-8deg)",
+    display: "inline-block",
+  },
+  "playfair-ital": { font: "italic 800 312px/0.92 'Playfair Display'", letterSpacing: "-4px" },
+  bebas: { font: "400 300px/0.88 'Bebas Neue'", letterSpacing: "6px" },
+};
+
+// One slide at native 1080×1350, scaled by the parent. Live HTML, not a
+// render: the type stays editable until export, which is the whole point.
+function SlideCanvas({
+  slide,
+  index,
+  total,
+  width,
+  identity,
+}: {
+  slide: CarouselSlide;
+  index: number;
+  total: number;
+  width: number;
+  identity?: CarouselIdentity;
+}) {
+  const who = identity ?? EMPTY_IDENTITY;
+  const scale = width / 1080;
+  const white = slide.theme === "white";
+  const ink = white ? "#fff" : "#111";
+  const shadow = white ? "0 2px 32px rgba(0,0,0,.28)" : "0 2px 32px rgba(255,255,255,.22)";
+  const logoFilter = white ? "brightness(0) invert(1)" : "brightness(0)";
+  const meta: React.CSSProperties = {
+    position: "absolute",
+    top: 44,
+    left: 72,
+    right: 72,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    font: "600 21px/1 'Inter'",
+    letterSpacing: "2.6px",
+    textTransform: "uppercase",
+  };
+  return (
+    <div
+      className="relative shrink-0 overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#0a0d13]"
+      style={{ width, height: (1350 / 1080) * width }}
+    >
+      <div
+        style={{
+          width: 1080,
+          height: 1350,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+          position: "relative",
+          overflow: "hidden",
+          color: ink,
+          fontFamily: "'Inter',sans-serif",
+        }}
+      >
+        <img
+          src={slideFileUrl(slide.bg)}
+          alt=""
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+          }}
+        />
+        {/* photo-native bottom vignette so chrome sits on a stable tone */}
+        {slide.kind !== "cover" && (
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: white ? 230 : 260,
+              background: white
+                ? "linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.38))"
+                : "linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.78))",
+            }}
+          />
+        )}
+        {slide.kind !== "cta" && (
+          <div style={meta}>
+            <span>{who.left}</span>
+            <span>{who.center}</span>
+            <span>{who.right}</span>
+          </div>
+        )}
+
+        {slide.kind === "cover" && (
+          <div
+            style={{
+              position: "absolute",
+              top: 170,
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              color: "#fff",
+              textShadow: "0 2px 36px rgba(0,0,0,.35)",
+            }}
+          >
+            <div style={{ font: "italic 700 84px/1 'Playfair Display'", letterSpacing: "2px" }}>
+              {slide.l1}
+            </div>
+            <div style={{ font: "700 340px/0.78 'Caveat'", margin: "0 0 42px" }}>{slide.l2}</div>
+            <div
+              style={{
+                font: "400 106px/1 'Archivo Black'",
+                letterSpacing: "5px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 16,
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  background: "#2e7d4f",
+                  color: "#fff",
+                  borderRadius: 10,
+                  padding: "10px 16px 14px",
+                  marginRight: 6,
+                  textShadow: "none",
+                  boxShadow: "0 4px 24px rgba(0,0,0,.35)",
+                }}
+              >
+                <span
+                  style={{
+                    font: "600 22px/1 'Inter'",
+                    letterSpacing: "1px",
+                    alignSelf: "flex-end",
+                  }}
+                >
+                  {slide.chipNum}
+                </span>
+                <span style={{ font: "400 84px/1 'Archivo Black'" }}>{slide.chipSym}</span>
+              </span>
+              <span>&nbsp;{slide.l3}</span>
+            </div>
+          </div>
+        )}
+
+        {slide.kind === "tool" && (
+          <div style={{ position: "absolute", top: 150, left: 0, right: 0, textAlign: "center" }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 20,
+                marginBottom: 24,
+                textShadow: shadow,
+              }}
+            >
+              {slide.logo && (
+                <img
+                  src={slideFileUrl(slide.logo)}
+                  alt=""
+                  style={{ height: slide.logoH ?? 76, width: "auto", filter: logoFilter }}
+                />
+              )}
+              <span
+                style={
+                  slide.quietStyle === "serifital"
+                    ? { font: "italic 700 50px/1 'Playfair Display'" }
+                    : { font: "600 42px/1.15 'Inter'", letterSpacing: ".5px" }
+                }
+              >
+                {slide.quiet}
+              </span>
+            </div>
+            <span
+              style={{
+                display: "block",
+                margin: "8px 0 26px",
+                textShadow: shadow,
+                ...(LOUD_FACES[slide.face ?? "archivo"] ?? LOUD_FACES.archivo),
+              }}
+            >
+              {slide.loud}
+            </span>
+            <div
+              style={{ font: "700 46px/1.3 'Inter'", letterSpacing: ".3px", textShadow: shadow }}
+            >
+              {slide.sub}
+            </div>
+          </div>
+        )}
+
+        {slide.kind === "cta" && (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                top: 44,
+                left: 72,
+                font: "600 30px/1.3 'Inter'",
+                color: "#fff",
+              }}
+            >
+              {slide.cornerTl?.[0] ?? who.ctaTl?.[0]}
+              <span style={{ display: "block", font: "italic 700 44px/1.1 'Playfair Display'" }}>
+                {slide.cornerTl?.[1] ?? who.ctaTl?.[1]}
+              </span>
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                top: 44,
+                right: 72,
+                font: "600 30px/1.3 'Inter'",
+                color: "#fff",
+                textAlign: "right",
+              }}
+            >
+              {slide.cornerTr?.[0] ?? who.ctaTr?.[0]}
+              <span style={{ display: "block", font: "italic 700 44px/1.1 'Playfair Display'" }}>
+                {slide.cornerTr?.[1] ?? who.ctaTr?.[1]}
+              </span>
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                top: 200,
+                left: 0,
+                right: 0,
+                textAlign: "center",
+                color: "#fff",
+                textShadow: "0 2px 32px rgba(0,0,0,.35)",
+              }}
+            >
+              <div
+                style={{
+                  font: "600 27px/1 'Inter'",
+                  letterSpacing: "6px",
+                  textTransform: "uppercase",
+                  marginBottom: 44,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 18,
+                  color: "rgba(255,255,255,.85)",
+                }}
+              >
+                {slide.logo && (
+                  <img
+                    src={slideFileUrl(slide.logo)}
+                    alt=""
+                    style={{ height: 38, filter: "brightness(0) invert(1)" }}
+                  />
+                )}
+                {slide.kicker}
+              </div>
+              <div style={{ font: "700 60px/1 'Inter'", marginBottom: 2 }}>{slide.comment}</div>
+              <div style={{ font: "700 300px/0.9 'Playfair Display'", letterSpacing: "2px" }}>
+                {slide.loud}
+              </div>
+              <div
+                style={{
+                  font: "700 46px/1.35 'Inter'",
+                  maxWidth: 620,
+                  margin: "16px auto 0",
+                }}
+              >
+                {slide.sub}
+              </div>
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                bottom: 56,
+                left: 72,
+                color: "#fff",
+                font: "italic 700 26px/1.4 'Inter'",
+                textTransform: "uppercase",
+                letterSpacing: "1px",
+              }}
+            >
+              {slide.microLogo && (
+                <img
+                  src={slideFileUrl(slide.microLogo)}
+                  alt=""
+                  style={{ height: 40, verticalAlign: -10, marginRight: 12 }}
+                />
+              )}
+              {slide.microTitle ?? who.microTitle}
+              <span
+                style={{
+                  display: "block",
+                  font: "italic 600 22px/1.4 'Inter'",
+                  textTransform: "none",
+                  letterSpacing: ".3px",
+                }}
+              >
+                {slide.microSub ?? who.microSub}
+              </span>
+            </div>
+          </>
+        )}
+
+        {slide.rail && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 46,
+              left: 72,
+              right: 72,
+              display: "flex",
+              alignItems: "center",
+              gap: 26,
+              font: "600 21px/1 'Inter'",
+              letterSpacing: "2.4px",
+            }}
+          >
+            <span>BACK</span>
+            <span style={{ flex: 1, height: 1.5, background: "currentColor", opacity: 0.9 }} />
+            <span style={{ display: "flex", gap: 30 }}>
+              {Array.from({ length: total }, (_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    opacity: i === index ? 1 : 0.85,
+                    fontSize: 20,
+                    position: "relative",
+                    ...(i === index
+                      ? { outline: "1.5px solid currentColor", outlineOffset: 6, borderRadius: 2 }
+                      : {}),
+                  }}
+                >
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+              ))}
+            </span>
+            <span style={{ flex: 1, height: 1.5, background: "currentColor", opacity: 0.9 }} />
+            <span>NEXT</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Carousel Studio ─────────────────────────────────────────────────────────
+
+// The real Instagram glyph (Simple Icons path) — nominative use, never redrawn.
+function InstagramMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className ?? "h-4 w-4"} fill="currentColor" aria-hidden>
+      <path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.76-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z" />
+    </svg>
+  );
+}
+
+// The beast is a design document, not a config file — render it like one.
+// Edit mode swaps to the raw markdown; this view is for reading.
+function BeastDoc({ text }: { text: string }) {
+  const lines = useMemo(() => text.split("\n"), [text]);
+  const inline = (str: string) =>
+    str.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) =>
+      part.startsWith("**") ? (
+        <strong key={i} className="font-semibold text-white/92">
+          {part.slice(2, -2)}
+        </strong>
+      ) : part.startsWith("`") ? (
+        <code
+          key={i}
+          className="rounded bg-white/[0.07] px-1 py-px font-mono text-[10.5px] text-amber-200/85"
+        >
+          {part.slice(1, -1)}
+        </code>
+      ) : (
+        <span key={i}>{part}</span>
+      ),
+    );
+  return (
+    <div className="space-y-1.5 text-[12px] leading-[1.75] text-white/55">
+      {lines.map((line, i) => {
+        const t = line.trim();
+        if (!t) return <div key={i} className="h-1.5" />;
+        if (t === "---") return <hr key={i} className="border-white/[0.07]" />;
+        if (t.startsWith("### "))
+          return (
+            <div key={i} className="pt-1 text-[11px] font-semibold text-white/80">
+              {inline(t.slice(4))}
+            </div>
+          );
+        if (t.startsWith("## "))
+          return (
+            <div
+              key={i}
+              className="pt-2.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/75"
+            >
+              {inline(t.slice(3))}
+            </div>
+          );
+        if (t.startsWith("# "))
+          return (
+            <div key={i} className="text-[13.5px] font-semibold tracking-[-0.01em] text-white/90">
+              {inline(t.slice(2))}
+            </div>
+          );
+        if (t.startsWith("- "))
+          return (
+            <div key={i} className="flex gap-2 pl-1">
+              <span className="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-white/35" />
+              <span>{inline(t.slice(2))}</span>
+            </div>
+          );
+        if (/^\d+\.\s/.test(t)) {
+          const m = t.match(/^(\d+)\.\s(.*)$/);
+          return (
+            <div key={i} className="flex gap-2 pl-1">
+              <span className="shrink-0 font-mono text-[10px] text-white/35">{m?.[1]}.</span>
+              <span>{inline(m?.[2] ?? "")}</span>
+            </div>
+          );
+        }
+        return <p key={i}>{inline(t)}</p>;
+      })}
+    </div>
+  );
+}
+
+// Who writes a brand-new carousel. Brand-level on purpose — you pick the
+// house, not the version. Claude rides the chat lane; GPT-5.6 rides the
+// Codex CLI through /__design_author.
+const AUTHOR_MODELS = [
+  { id: "claude", label: "Claude", model: "claude-sonnet-5" },
+  { id: "gpt", label: "GPT-5.6", model: "gpt-5.6" },
+];
+// Where a finished carousel can land. Real platform glyphs (Simple Icons
+// paths — the actual marks, never redrawn). `max` is the platform's own
+// image-per-post ceiling where it's lower than a full deck.
+const PLATFORM_GLYPHS: Record<string, string> = {
+  x: "M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z",
+  linkedin:
+    "M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z",
+  tiktok:
+    "M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z",
+  threads:
+    "M18.263 11.097c-.03-3.486-1.92-5.586-5.111-5.586-2.13 0-3.922.963-4.863 2.499l2.062 1.438c.535-.843 1.272-1.543 2.628-1.543 1.528 0 2.318.85 2.544 2.431a15 15 0 0 0-2.236-.173c-4.125 0-6.068 1.867-6.068 4.336s1.943 3.99 4.804 3.99c3.139 0 5.013-2.115 5.781-4.735.798.361 1.348 1.204 1.348 2.47 0 3.387-3.907 5.232-7.22 5.232-4.885 0-8.077-3.207-8.077-8.424 0-6.392 4.223-10.487 9.9-10.487 3.808 0 5.69 1.671 6.97 3.914l2.108-1.475C21.44 2.078 18.331 0 13.663 0 6.227 0 1.168 5.277 1.168 12.934c0 7 4.953 11.066 10.856 11.066 4.878 0 9.809-2.846 9.809-7.716 0-2.545-1.46-4.231-3.569-5.187m-6.33 4.855c-1.077 0-2.026-.512-2.026-1.453 0-1.483 1.822-1.934 3.606-1.934.678 0 1.34.045 1.927.173-.422 1.927-1.671 3.215-3.508 3.214Z",
+  facebook:
+    "M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z",
+  pinterest:
+    "M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.663.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.688 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.099.12.112.225.085.345-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.401.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.354-.629-2.758-1.379l-.749 2.848c-.269 1.045-1.004 2.352-1.498 3.146 1.123.345 2.306.535 3.55.535 6.607 0 11.985-5.365 11.985-11.987C23.97 5.39 18.592.026 11.985.026L12.017 0z",
+  bluesky:
+    "M5.202 2.857C7.954 4.922 10.913 9.11 12 11.358c1.087-2.247 4.046-6.436 6.798-8.501C20.783 1.366 24 .213 24 3.883c0 .732-.42 6.156-.667 7.037-.856 3.061-3.978 3.842-6.755 3.37 4.854.826 6.089 3.562 3.422 6.299-5.065 5.196-7.28-1.304-7.847-2.97-.104-.305-.152-.448-.153-.327 0-.121-.05.022-.153.327-.568 1.666-2.782 8.166-7.847 2.97-2.667-2.737-1.432-5.473 3.422-6.3-2.777.473-5.899-.308-6.755-3.369C.42 10.04 0 4.615 0 3.883c0-3.67 3.217-2.517 5.202-1.026",
+};
+
+// How a finished deck leaves the room. Export is always available and needs
+// no account — everything else is opt-in, and named with its real mark so
+// nobody is nudged toward one vendor.
+const POSTER_GLYPHS: Record<string, string> = {
+  buffer:
+    "M1.371 5.476L11.943 0l10.686 5.476-10.686 5.495zm3.36 4.81l7.212 3.547 7.288-3.547 3.398 1.655-10.686 5.202L1.371 11.94zm0 6.171l7.212 3.911 7.288-3.91 3.398 1.815L11.943 24 1.371 18.273z",
+  hootsuite:
+    "M11.417 11.14c.505.75.28 1.572-.38 2.017-.66.444-1.505.343-2.01-.407-.506-.75-.282-1.572.378-2.017.66-.444 1.506-.343 2.012.407zm5.017-.274c-.66.444-.884 1.266-.379 2.016.506.75 1.352.852 2.012.407.66-.444.884-1.266.379-2.016-.506-.75-1.352-.852-2.012-.407zm7.422-7.086L19.03 6.638l.236.272c2.224 2.613 3.591 6.409 4.247 8.606a4.362 4.362 0 0 1-.638 3.8C21.449 21.295 18.398 24 12.369 24c-6.58 0-10-3.25-11.644-5.251a3.117 3.117 0 0 1-.51-3.067c.909-2.444 2.766-7.126 4.257-8.825a13.158 13.158 0 0 1 2.897-2.478L2.4.534c-.27-.208-.034-.632.285-.513l8.077 3.006c.38-.066.758-.1 1.13-.1 1.407 0 2.737.307 4.074 1.084l7.744-.695c.266-.024.378.331.147.464zm-8.218 13.656a4.126 4.126 0 0 1-3.316-.232c-.073-.037-.143.055-.087.115.457.49 1.273 1.35 1.766 1.775.102.088.259.077.35-.023l1.369-1.512c.053-.059-.008-.15-.082-.123zm.24-1.156-1.796-2.018a.34.34 0 0 0-.513.008l-1.44 1.716a.18.18 0 0 0 .031.262c.333.239 1.148.76 1.942.76.734 0 1.402-.285 1.724-.447a.18.18 0 0 0 .052-.281zm1.616-8.409c-.3-.034-.603.035-.862.188l-1.808 1.07c-.45.268-1.02.231-1.432-.091L11.819 7.82a4.669 4.669 0 0 0-1.776-.858c-2.698-.638-4.532.78-5.914 3.44-1.32 2.539-.583 6.184 2.672 7.05 3.438.914 5.71-2.903 6.618-4.175a.439.439 0 0 1 .712-.002c1.408 1.916 3.306 3.968 5.34 3.557 2.656-.535 2.342-3.905 1.512-5.7-.735-1.588-1.83-3.074-3.49-3.262z",
+  zapier:
+    "M4.157 0A4.151 4.151 0 0 0 0 4.161v15.678A4.151 4.151 0 0 0 4.157 24h15.682A4.152 4.152 0 0 0 24 19.839V4.161A4.152 4.152 0 0 0 19.839 0H4.157Zm10.61 8.761h.03a.577.577 0 0 1 .23.038.585.585 0 0 1 .201.124.63.63 0 0 1 .162.431.612.612 0 0 1-.162.435.58.58 0 0 1-.201.128.58.58 0 0 1-.23.042.529.529 0 0 1-.235-.042.585.585 0 0 1-.332-.328.559.559 0 0 1-.038-.235.613.613 0 0 1 .17-.431.59.59 0 0 1 .405-.162Zm2.853 1.572c.03.004.061.004.095.004.325-.011.646.064.937.219.238.144.431.355.552.609.128.279.189.582.185.888v.193a2 2 0 0 1 0 .219h-2.498c.003.227.075.45.204.642a.78.78 0 0 0 .646.265.714.714 0 0 0 .484-.136.642.642 0 0 0 .23-.318l.915.257a1.398 1.398 0 0 1-.28.537c-.14.159-.321.284-.521.355a2.234 2.234 0 0 1-.836.136 1.923 1.923 0 0 1-1.001-.245 1.618 1.618 0 0 1-.665-.703 2.221 2.221 0 0 1-.227-1.036 1.95 1.95 0 0 1 .48-1.398 1.9 1.9 0 0 1 1.3-.488Zm-9.607.023c.162.004.325.026.48.079.207.065.4.174.563.314.26.302.393.692.366 1.088v2.276H8.53l-.109-.711h-.065c-.064.163-.155.31-.272.439a1.122 1.122 0 0 1-.374.264 1.023 1.023 0 0 1-.453.083 1.334 1.334 0 0 1-.866-.264.965.965 0 0 1-.329-.801.993.993 0 0 1 .076-.431 1.02 1.02 0 0 1 .242-.363 1.478 1.478 0 0 1 1.043-.303h.952v-.181a.696.696 0 0 0-.136-.454.553.553 0 0 0-.438-.154.695.695 0 0 0-.378.086.48.48 0 0 0-.193.254l-.99-.144a1.26 1.26 0 0 1 .257-.563c.14-.174.321-.302.533-.378.261-.091.54-.136.82-.129.053-.003.106-.007.163-.007Zm4.384.007c.174 0 .347.038.506.114.182.083.34.211.458.374.257.423.377.911.351 1.406a2.53 2.53 0 0 1-.355 1.448 1.148 1.148 0 0 1-1.009.517c-.204 0-.401-.045-.582-.136a1.052 1.052 0 0 1-.48-.457 1.298 1.298 0 0 1-.114-.234h-.045l.004 1.784h-1.059v-4.713h.904l.117.805h.057c.068-.208.177-.401.328-.56a1.129 1.129 0 0 1 .843-.344h.076v-.004Zm7.559.084h.903l.113.805h.053a1.37 1.37 0 0 1 .235-.484.813.813 0 0 1 .313-.242.82.82 0 0 1 .39-.076h.234v1.051h-.401a.662.662 0 0 0-.313.008.623.623 0 0 0-.272.155.663.663 0 0 0-.174.26.683.683 0 0 0-.027.314v1.875h-1.054v-3.666Zm-17.515.003h3.262v.896L3.73 13.104l.034.113h1.973l.042.9H2.4v-.9l1.931-1.754-.045-.117H2.441v-.896Zm11.815 0h1.055v3.659h-1.055V10.45Zm3.443.684.019.016a.69.69 0 0 0-.351.045.756.756 0 0 0-.287.204c-.11.155-.174.336-.189.522h1.545c-.034-.526-.257-.787-.74-.787h.003Zm-5.718.163c-.026 0-.057 0-.083.004a.78.78 0 0 0-.31.053.746.746 0 0 0-.257.189 1.016 1.016 0 0 0-.204.695v.064c-.015.257.057.507.204.711a.634.634 0 0 0 .253.196.638.638 0 0 0 .314.061.644.644 0 0 0 .578-.265c.14-.223.204-.48.189-.74a1.216 1.216 0 0 0-.181-.711.677.677 0 0 0-.503-.257Zm-4.509 1.266a.464.464 0 0 0-.268.102.373.373 0 0 0-.114.276c0 .053.008.106.027.155a.375.375 0 0 0 .087.132.576.576 0 0 0 .397.11v.004a.863.863 0 0 0 .563-.182.573.573 0 0 0 .211-.457v-.14h-.903Z",
+  make: "M13.38 3.498c-.27 0-.511.19-.566.465L9.85 18.986a.578.578 0 0 0 .453.678l4.095.826a.58.58 0 0 0 .682-.455l2.963-15.021a.578.578 0 0 0-.453-.678l-4.096-.826a.589.589 0 0 0-.113-.012zm-5.876.098a.576.576 0 0 0-.516.318L.062 17.697a.575.575 0 0 0 .256.774l3.733 1.877a.578.578 0 0 0 .775-.258l6.926-13.781a.577.577 0 0 0-.256-.776L7.762 3.658a.571.571 0 0 0-.258-.062zm11.74.115a.576.576 0 0 0-.576.576v15.426c0 .318.258.578.576.578h4.178a.58.58 0 0 0 .578-.578V4.287a.578.578 0 0 0-.578-.576Z",
+};
+
+const POSTERS = [
+  {
+    id: "export",
+    label: "Save the images",
+    hint: "PNG per slide, straight to a folder — no account",
+    kind: "free" as const,
+  },
+  {
+    id: "blotato",
+    label: "Blotato",
+    hint: "One call, native carousels on 9 platforms",
+    kind: "api" as const,
+  },
+  {
+    id: "buffer",
+    label: "Buffer",
+    hint: "Schedule through your Buffer queue",
+    kind: "soon" as const,
+  },
+  {
+    id: "hootsuite",
+    label: "Hootsuite",
+    hint: "Post via a Hootsuite workspace",
+    kind: "soon" as const,
+  },
+  {
+    id: "zapier",
+    label: "Zapier",
+    hint: "Fire a webhook into any Zap",
+    kind: "soon" as const,
+  },
+  {
+    id: "make",
+    label: "Make",
+    hint: "Send the deck to a Make scenario",
+    kind: "soon" as const,
+  },
+];
+
+function PosterMark({ id, className }: { id: string; className?: string }) {
+  const cls = className ?? "h-4 w-4";
+  if (id === "blotato")
+    return (
+      <img src={blotatoLogo} alt="" className={`${cls} rounded-[3px] object-contain`} aria-hidden />
+    );
+  if (id === "export") return <Download className={cls} aria-hidden />;
+  return (
+    <svg viewBox="0 0 24 24" className={cls} fill="currentColor" aria-hidden>
+      <path d={POSTER_GLYPHS[id] ?? ""} />
+    </svg>
+  );
+}
+
+const PUBLISH_PLATFORMS = [
+  { id: "instagram", label: "Instagram", tone: "#E4405F", on: true },
+  { id: "linkedin", label: "LinkedIn", tone: "#0A66C2", on: true },
+  { id: "threads", label: "Threads", tone: "#f5f5f5", on: true },
+  { id: "x", label: "X", tone: "#f5f5f5", on: true },
+  { id: "facebook", label: "Facebook", tone: "#0866FF", on: false },
+  { id: "tiktok", label: "TikTok", tone: "#f5f5f5", on: false },
+  { id: "pinterest", label: "Pinterest", tone: "#BD081C", on: false },
+  { id: "bluesky", label: "Bluesky", tone: "#0285FF", on: false, max: 4 },
+];
+
+function PlatformMark({ id, className }: { id: string; className?: string }) {
+  if (id === "instagram") return <InstagramMark className={className} />;
+  return (
+    <svg viewBox="0 0 24 24" className={className ?? "h-4 w-4"} fill="currentColor" aria-hidden>
+      <path d={PLATFORM_GLYPHS[id] ?? ""} />
+    </svg>
+  );
+}
+
+const LOUD_FACE_IDS = [
+  "stix",
+  "baloo",
+  "archivo",
+  "slab",
+  "archivo-ital",
+  "playfair-ital",
+  "bebas",
+];
+
+function useFocusSlideWidth(): number {
+  const [w, setW] = useState(440);
+  useEffect(() => {
+    const size = () =>
+      setW(Math.max(300, Math.min(440, Math.round(((window.innerHeight - 330) / 1350) * 1080))));
+    size();
+    window.addEventListener("resize", size);
+    return () => window.removeEventListener("resize", size);
+  }, []);
+  return w;
+}
+
+function CarouselStudio() {
+  const focusW = useFocusSlideWidth();
+  const [carousels, setCarousels] = useState<CarouselDoc[]>([]);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [focus, setFocus] = useState(0);
+  const [view, setView] = useState<"strip" | "phone">("strip");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useDismiss(pickerOpen, () => setPickerOpen(false));
+
+  const [beast, setBeast] = useState("");
+  const [beastPath, setBeastPath] = useState("");
+  const [beastDirty, setBeastDirty] = useState(false);
+  const [beastSaving, setBeastSaving] = useState(false);
+  const [beastEdit, setBeastEdit] = useState(false);
+  // A studio can hold several carousel systems; each is its own document on
+  // disk, and a deck names the one it follows.
+  type ModeSummary = { id: string; name: string; path: string; bytes: number; palette: string[] };
+  const [modes, setModes] = useState<ModeSummary[]>([]);
+  const [sysOpen, setSysOpen] = useState<ModeSummary | null>(null);
+  const [makingSystem, setMakingSystem] = useState(false);
+  const [panelOpen, setPanelOpen] = useSticky<boolean>("beastOpen", true);
+  const [panelW, setPanelW] = useSticky<number>("beastWidth", 400);
+  const dragging = useRef(false);
+  // Drag from the panel's left edge. Width is clamped so the deck always has
+  // room to breathe, and persisted so a reload keeps the layout you chose.
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      e.preventDefault();
+      setPanelW(Math.max(300, Math.min(760, window.innerWidth - e.clientX - 28)));
+    };
+    const up = () => {
+      dragging.current = false;
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, [setPanelW]);
+  const [assetsOpen, setAssetsOpen] = useState(true);
+
+  const [feedback, setFeedback] = useState("");
+  const [scope, setScope] = useState<"slide" | "set">("slide");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishNote, setPublishNote] = useState<string | null>(null);
+  const [publishNeedsKey, setPublishNeedsKey] = useState(false);
+  const [route, setRoute] = useState<string>("export");
+  const [blotatoKey, setBlotatoKey] = useState("");
+  const publishRef = useDismiss(publishOpen, () => setPublishOpen(false));
+  const [targets, setTargets] = useState<Set<string>>(
+    () => new Set(PUBLISH_PLATFORMS.filter((pl) => pl.on).map((pl) => pl.id)),
+  );
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const c = await (await fetch("/__design_carousel")).json();
+        if (c.ok) setCarousels(c.carousels);
+        const list = await (await fetch("/__design_modes")).json();
+        if (list.ok) setModes(list.modes);
+        const m = await (await fetch("/__design_mode?id=carousel")).json();
+        if (m.ok) {
+          setBeast(m.beast);
+          setBeastPath(m.path);
+        }
+      } catch (e) {
+        setErr(`couldn't load the studio state — ${e instanceof Error ? e.message : String(e)}`);
+      }
+    })();
+  }, []);
+
+  const doc = carousels[activeIdx] ?? null;
+  const slides = useMemo(() => doc?.slides ?? [], [doc]);
+  const focused = slides[focus] ?? null;
+
+  // ← → walk the deck — but never while typing into a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable)
+        return;
+      if (e.key === "ArrowRight") setFocus((f) => Math.min(f + 1, slides.length - 1));
+      if (e.key === "ArrowLeft") setFocus((f) => Math.max(f - 1, 0));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [slides.length]);
+
+  // Every image this carousel is built from — the photographs and the marks.
+  const assets = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { path: string; label: string }[] = [];
+    for (const s of slides) {
+      for (const [p, label] of [
+        [s.bg, "photo"],
+        [s.logo, "mark"],
+        [s.microLogo, "mark"],
+      ] as const) {
+        if (p && !seen.has(p)) {
+          seen.add(p);
+          out.push({ path: p, label });
+        }
+      }
+    }
+    return out;
+  }, [slides]);
+
+  const saveCarousels = useCallback(async (next: CarouselDoc[]) => {
+    setCarousels(next);
+    try {
+      await fetch("/__design_carousel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({ carousels: next }),
+      });
+    } catch {
+      setErr("saved locally, but the disk write failed");
+    }
+  }, []);
+
+  const saveBeast = useCallback(async (value: string, sysId = "carousel") => {
+    setBeastSaving(true);
+    try {
+      const r = await fetch("/__design_mode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Claude-OS-Token": await studioToken(),
+        },
+        body: JSON.stringify({ id: sysId, beast: value }),
+      });
+      if ((await r.json()).ok) setBeastDirty(false);
+      const list = await (await fetch("/__design_modes")).json();
+      if (list.ok) setModes(list.modes);
+    } finally {
+      setBeastSaving(false);
+    }
+  }, []);
+
+  // Open one system's document in the drawer — each system is its own file,
+  // so switching means loading that file, not filtering one blob.
+  const openSystem = useCallback(
+    async (m: { id: string; name: string; path: string; bytes: number; palette: string[] }) => {
+      const r = await (await fetch(`/__design_mode?id=${encodeURIComponent(m.id)}`)).json();
+      if (r.ok) {
+        setBeast(r.beast);
+        setBeastDirty(false);
+        setBeastEdit(false);
+        setSysOpen(m);
+      }
+    },
+    [],
+  );
+
+  // Point this deck at a different system. The deck stores the id; the
+  // document itself is never copied, so one edit still reaches every deck.
+  const applySystem = useCallback(
+    async (id: string) => {
+      const next = carousels.map((c, ci) => (ci === activeIdx ? { ...c, system: id } : c));
+      await saveCarousels(next);
+    },
+    [carousels, activeIdx, saveCarousels],
+  );
+
+  const deleteSystem = useCallback(async (m: ModeSummary) => {
+    if (m.id === "carousel") return;
+    if (!window.confirm(`Delete the "${m.name}" system? Its document is removed from disk.`))
+      return;
+    await fetch("/__design_mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+      body: JSON.stringify({ remove: m.id }),
+    });
+    const list = await (await fetch("/__design_modes")).json();
+    if (list.ok) setModes(list.modes);
+    setSysOpen((cur) => (cur?.id === m.id ? null : cur));
+  }, []);
+
+  const newSystem = useCallback(
+    async (brief: { name: string; notes: string; refs: { id: string; path: string }[] }) => {
+      const name = brief.name;
+      const id = `${name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")}`;
+      if (!id) return;
+      const refLines = brief.refs.length
+        ? `\n## Reference\nThe look these decks are measured against:\n${brief.refs
+            .map((r) => `- ${r.path}`)
+            .join("\n")}\n`
+        : "";
+      const notes = brief.notes.trim() ? `\n## The idea\n${brief.notes.trim()}\n` : "";
+      const starter = `# ${name.trim()}\n\nCanvas: 1080 × 1350 px (4:5).\n${notes}${refLines}\n## Colour\n- Text: \`#ffffff\` on dark photos, \`#111111\` on light photos.\n- One accent for the whole set.\n\n## Type\n- Quiet label:\n- LOUD name:\n- Subtitle:\n\n## Layout\n- Describe the grid, the chrome, the rails.\n\n## Voice\n- What each line is for.\n`;
+      await fetch("/__design_mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({ id, beast: starter }),
+      });
+      const list = await (await fetch("/__design_modes")).json();
+      if (list.ok) {
+        setModes(list.modes);
+        const made = list.modes.find((m: { id: string }) => m.id === id);
+        if (made) void openSystem(made);
+      }
+    },
+    [openSystem],
+  );
+
+  const regenSlide = useCallback(async () => {
+    if (!doc || !focused || !feedback.trim()) return;
+    setBusy("Regenerating the photograph…");
+    setErr(null);
+    try {
+      const prov = await (await fetch("/__design_providers")).json();
+      // Prefer the cheap lanes, but never refuse an engine the operator has
+      // actually connected just because it isn't on a favourites list.
+      const configured = (prov.engines ?? []).filter((e: StudioEngine) => e.configured);
+      const order = ["kie", "openrouter", "openai"];
+      const engine =
+        order.map((id) => configured.find((e: StudioEngine) => e.id === id)).filter(Boolean)[0] ??
+        configured[0];
+      if (!engine) throw new Error("No image engine connected — add a key in Create → Connections");
+      const models = await (await fetch(`/__design_models?engine=${engine.id}`)).json();
+      const model = (models.models ?? []).find((m: StudioModel) => m.kind === "image");
+      if (!model) throw new Error(`${engine.label} returned no image models`);
+      const subject = focused.loud ?? focused.l2 ?? "the cover";
+      const prompt =
+        `${feedback.trim()}. Cinematic natural-light photographic background for slide ` +
+        `${focus + 1} ("${subject}") of an Instagram carousel. 4:5 portrait, at least 45% ` +
+        `sky or soft negative space in the top half, a single small subject low in frame, ` +
+        `no text or lettering anywhere in the image.`;
+      const r = await fetch("/__design_generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({
+          engine: engine.id,
+          engineLabel: engine.label,
+          model: model.id,
+          modelLabel: model.label,
+          prompt,
+          kind: "image",
+          count: 1,
+          params: {},
+          references: [],
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok || !d.items?.length) throw new Error(d.error || "generation failed");
+      const next = carousels.map((c, ci) =>
+        ci !== activeIdx
+          ? c
+          : {
+              ...c,
+              slides: c.slides.map((sl, si) =>
+                si === focus ? { ...sl, bg: d.items[0].path } : sl,
+              ),
+            },
+      );
+      await saveCarousels(next);
+      setFeedback("");
+      setFlash(`Slide ${focus + 1}'s photograph replaced`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [doc, focused, feedback, focus, carousels, activeIdx, saveCarousels]);
+
+  // A whole-set note doesn't touch pixels — it amends the system document,
+  // which is what "change them all" actually means in a system-driven studio.
+  const amendSet = useCallback(async () => {
+    if (!feedback.trim()) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const next = `${beast.trimEnd()}\n\n## Amendment — ${today}\n- ${feedback.trim()}\n`;
+    setBeast(next);
+    await saveBeast(next);
+    setFeedback("");
+    setFlash("Written into the system — every future slide obeys it");
+  }, [beast, feedback, saveBeast]);
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 4000);
+    return () => clearTimeout(t);
+  }, [flash]);
+
+  const send = scope === "slide" ? regenSlide : amendSet;
+
+  // Save the deck as a folder: images plus the live compositor, openable in
+  // any browser, no account involved. This is the default route on purpose.
+  const exportDeck = useCallback(async () => {
+    if (!doc || publishBusy) return;
+    setPublishBusy(true);
+    setPublishNote("Writing the deck…");
+    try {
+      const node = document.getElementById("carousel-export-source");
+      const html = node
+        ? `<!doctype html><meta charset="utf-8"><title>${doc.name}</title>` +
+          `<style>body{margin:0;background:#111;display:flex;flex-direction:column;` +
+          `align-items:center;gap:24px;padding:24px}</style>${node.innerHTML}`
+        : "";
+      const r = await fetch("/__design_export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({ carouselId: doc.id, html }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "export failed");
+      setPublishNote(`Saved ${d.slides} slides and ${d.assets} images to ${d.dir}`);
+    } catch (e) {
+      setPublishNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPublishBusy(false);
+    }
+  }, [doc, publishBusy]);
+
+  const publish = useCallback(async () => {
+    if (!doc || publishBusy) return;
+    setPublishBusy(true);
+    setPublishNote("Checking your Blotato account…");
+    setPublishNeedsKey(false);
+    try {
+      const r = await fetch("/__design_publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({ carouselId: doc.id, platforms: [...targets], caption: doc.name }),
+      });
+      const d = await r.json();
+      if (r.status === 428) {
+        setPublishNeedsKey(true);
+        setPublishNote(null);
+        return;
+      }
+      if (!d.ok && d.stage === "render") {
+        setPublishNote(
+          "This deck has no finished renders yet — the seed deck publishes today; the render pass for new decks is next.",
+        );
+        return;
+      }
+      if (!d.ok && !d.results) {
+        setPublishNote(d.error ?? "publish failed");
+        return;
+      }
+      const lines = (d.results ?? []).map(
+        (x: { platform: string; ok: boolean; detail: string }) =>
+          `${x.platform}: ${x.ok ? "✓ queued" : x.detail}`,
+      );
+      setPublishNote(lines.join(" · ") || "done");
+    } catch (e) {
+      setPublishNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPublishBusy(false);
+    }
+  }, [doc, publishBusy, targets]);
+
+  const connectBlotato = useCallback(async () => {
+    if (!blotatoKey.trim()) return;
+    setPublishNote("Saving the key…");
+    const r = await fetch("/__design_set_key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+      body: JSON.stringify({ provider: "blotato", key: blotatoKey.trim() }),
+    });
+    if ((await r.json()).ok) {
+      setBlotatoKey("");
+      setPublishNeedsKey(false);
+      void publish();
+    } else {
+      setPublishNote("couldn't save the key");
+    }
+  }, [blotatoKey, publish]);
+
+  if (!doc) {
+    // An empty room must still have a door. The composer lives here too,
+    // because a fresh machine has no seed deck to hang it off.
+    return (
+      <>
+        <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-12 text-center">
+          <div className="mx-auto mb-5 grid h-12 w-12 place-items-center rounded-2xl border border-white/[0.1] bg-white/[0.04]">
+            <InstagramMark className="h-5 w-5 text-[#E4405F]" />
+          </div>
+          <div className="text-[15px] font-semibold text-white/85">No carousels yet</div>
+          <p className="mx-auto mt-2 max-w-[420px] text-[12.5px] leading-relaxed text-white/40">
+            {err ??
+              "Give it a topic and the studio writes the whole deck against your system document — then you change any slide by talking to it."}
+          </p>
+          <button
+            onClick={() => setCreating(true)}
+            className="mt-6 rounded-xl bg-white px-6 py-2.5 text-[13px] font-semibold text-black transition-transform hover:-translate-y-0.5"
+          >
+            New carousel
+          </button>
+        </div>
+        {creating && (
+          <NewCarouselComposer
+            beast={beast}
+            seedPool={[]}
+            onClose={() => setCreating(false)}
+            onCreated={(docNew) => {
+              void saveCarousels([...carousels, docNew]);
+              setActiveIdx(carousels.length);
+              setFocus(0);
+              setCreating(false);
+            }}
+          />
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-5 xl:flex-row">
+      <div className="min-w-0 flex-1">
+        {/* header: which carousel, and the ways out */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="relative" ref={pickerRef}>
+            <button
+              onClick={() => setPickerOpen((v) => !v)}
+              className="flex items-center gap-2.5 rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2 transition-colors hover:bg-white/[0.07]"
+            >
+              <InstagramMark className="h-4.5 w-4.5 text-[#E4405F]" />
+              <span className="text-[14px] font-semibold tracking-[-0.01em]">{doc.name}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-white/40" />
+            </button>
+            {pickerOpen && (
+              <div className="absolute left-0 top-full z-40 mt-2 w-[300px] rounded-xl border border-white/[0.12] bg-[#0d1017] p-1.5 shadow-2xl">
+                {carousels.map((c, i) => (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      setActiveIdx(i);
+                      setFocus(0);
+                      setPickerOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors",
+                      i === activeIdx ? "bg-white/[0.09]" : "hover:bg-white/[0.05]",
+                    )}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12.5px] font-medium text-white/90">
+                        {c.name}
+                      </div>
+                      <div className="text-[10px] text-white/35">
+                        {c.slides.length} slides · {c.createdAt}
+                      </div>
+                    </div>
+                    {i === activeIdx && <Check className="h-3.5 w-3.5 text-white/60" />}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    setPickerOpen(false);
+                    setCreating(true);
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg border border-dashed border-white/[0.15] px-3 py-2.5 text-[12.5px] font-medium text-white/60 transition-colors hover:bg-white/[0.05] hover:text-white/90"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New carousel
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setCreating(true)}
+            title="New carousel"
+            className="rounded-xl border border-white/[0.1] bg-white/[0.03] p-2.5 text-white/50 transition-colors hover:bg-white/[0.08] hover:text-white"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <div className="text-[11px] text-white/35">
+            {slides.length} slides · 1080×1350 · {doc.source ?? "saved system"}
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex rounded-lg border border-white/[0.09] p-0.5">
+              {(["strip", "phone"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-[11px] font-medium capitalize transition-colors",
+                    view === v ? "bg-white/[0.1] text-white" : "text-white/40 hover:text-white/70",
+                  )}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+            <div className="relative" ref={publishRef}>
+              <button
+                onClick={() => setPublishOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-lg border border-white/[0.1] bg-white/[0.04] px-3.5 py-2 text-[12px] font-medium text-white/85 transition-colors hover:bg-white/[0.08]"
+              >
+                <img src={blotatoLogo} alt="" className="h-4.5 w-4.5 rounded-[4px]" />
+                Publish
+                <ChevronDown className="h-3 w-3 text-white/35" />
+              </button>
+              {publishOpen && (
+                <div className="absolute right-0 top-full z-40 mt-2 w-[320px] rounded-xl border border-white/[0.12] bg-[#0d1017] p-3 shadow-2xl">
+                  <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/50">
+                    How it leaves
+                  </div>
+                  <div className="mb-3 space-y-1">
+                    {POSTERS.map((p2) => (
+                      <button
+                        key={p2.id}
+                        onClick={() => p2.kind !== "soon" && setRoute(p2.id)}
+                        disabled={p2.kind === "soon"}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                          route === p2.id
+                            ? "border-white/[0.24] bg-white/[0.08]"
+                            : "border-white/[0.06] hover:border-white/[0.14]",
+                          p2.kind === "soon" &&
+                            "cursor-default opacity-35 hover:border-white/[0.06]",
+                        )}
+                      >
+                        <PosterMark
+                          id={p2.id}
+                          className={cn(
+                            "h-4 w-4 shrink-0",
+                            route === p2.id ? "text-white" : "text-white/45",
+                          )}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "block text-[11.5px] font-semibold",
+                              route === p2.id ? "text-white" : "text-white/65",
+                            )}
+                          >
+                            {p2.label}
+                          </span>
+                          <span className="block text-[9.5px] leading-tight text-white/32">
+                            {p2.hint}
+                          </span>
+                        </span>
+                        {p2.kind === "soon" ? (
+                          <span className="shrink-0 text-[8.5px] uppercase tracking-wider text-white/25">
+                            soon
+                          </span>
+                        ) : (
+                          route === p2.id && <Check className="h-3 w-3 shrink-0 text-white/60" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {route !== "export" && (
+                    <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/50">
+                      Where this deck goes
+                    </div>
+                  )}
+                  <div className={cn("grid grid-cols-2 gap-1.5", route === "export" && "hidden")}>
+                    {PUBLISH_PLATFORMS.map((pl) => {
+                      const active = targets.has(pl.id);
+                      return (
+                        <button
+                          key={pl.id}
+                          onClick={() =>
+                            setTargets((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(pl.id)) next.delete(pl.id);
+                              else next.add(pl.id);
+                              return next;
+                            })
+                          }
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-[11.5px] font-medium transition-colors",
+                            active
+                              ? "border-white/[0.22] bg-white/[0.08] text-white"
+                              : "border-white/[0.06] text-white/40 hover:text-white/70",
+                          )}
+                        >
+                          <PlatformMark id={pl.id} className="h-3.5 w-3.5" />
+                          <span className="min-w-0 flex-1 truncate">{pl.label}</span>
+                          {pl.max ? (
+                            <span className="text-[8.5px] text-white/30">first {pl.max}</span>
+                          ) : (
+                            active && <Check className="h-3 w-3 text-white/60" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {publishNeedsKey && route === "blotato" && (
+                    <div className="mt-3 rounded-lg border border-sky-300/20 bg-sky-400/[0.06] p-2.5">
+                      <div className="mb-1.5 flex items-center gap-2 text-[10.5px] text-sky-100/85">
+                        <img src={blotatoLogo} alt="" className="h-4 w-4 rounded" />
+                        Paste your Blotato API key — stored on this machine only.
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input
+                          value={blotatoKey}
+                          onChange={(e) => setBlotatoKey(e.target.value)}
+                          type="password"
+                          placeholder="blt_…"
+                          className="min-w-0 flex-1 rounded-md border border-white/[0.1] bg-black/40 px-2.5 py-1.5 font-mono text-[11px] text-white/85 focus:outline-none"
+                        />
+                        <button
+                          onClick={() => void connectBlotato()}
+                          disabled={!blotatoKey.trim()}
+                          className="rounded-md bg-white px-3 text-[11px] font-semibold text-black disabled:opacity-30"
+                        >
+                          Connect
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {publishNote && (
+                    <div className="mt-3 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-[10.5px] leading-relaxed text-white/70">
+                      {publishNote}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => (route === "export" ? void exportDeck() : void publish())}
+                    disabled={publishBusy || (route !== "export" && targets.size === 0)}
+                    className="mt-2.5 w-full rounded-lg bg-white py-2 text-[12px] font-semibold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+                  >
+                    {publishBusy
+                      ? route === "export"
+                        ? "Saving…"
+                        : "Publishing…"
+                      : route === "export"
+                        ? "Save the deck"
+                        : `Publish to ${targets.size} platform${targets.size === 1 ? "" : "s"}`}
+                  </button>
+                  <p className="mt-1.5 text-center text-[9px] leading-relaxed text-white/28">
+                    {route === "export"
+                      ? "Images and a self-contained page, straight into your designs folder."
+                      : "Rides your own account — nothing is sent anywhere until you connect it."}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* the work: focused slide first, the deck underneath */}
+        {view === "strip" ? (
+          <div className="relative flex justify-center">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-1/2 h-[70%] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-30 blur-[80px]"
+              style={{
+                background:
+                  "linear-gradient(120deg, rgba(255,118,92,0.5), rgba(93,180,255,0.45), rgba(147,120,255,0.5))",
+              }}
+            />
+            {focused && (
+              <SlideCanvas
+                slide={focused}
+                index={focus}
+                total={slides.length}
+                width={focusW}
+                identity={doc.identity}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="flex justify-center">
+            <div className="rounded-[42px] border border-white/[0.13] bg-black p-3 shadow-[0_30px_80px_-40px_rgba(0,0,0,0.9)]">
+              <div className="mb-2 flex justify-center">
+                <div className="h-[18px] w-[110px] rounded-full bg-white/[0.07]" />
+              </div>
+              {focused && (
+                <SlideCanvas
+                  slide={focused}
+                  index={focus}
+                  total={slides.length}
+                  width={340}
+                  identity={doc.identity}
+                />
+              )}
+              <div className="mt-3 flex items-center justify-center gap-1.5">
+                {slides.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setFocus(i)}
+                    className={cn(
+                      "h-1.5 rounded-full transition-all",
+                      i === focus ? "w-4 bg-white/80" : "w-1.5 bg-white/25",
+                    )}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* speak to it — one slide, or the whole set */}
+        <div className="mx-auto mt-4 max-w-[600px]">
+          <div className="flex items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.03] p-2 pl-2.5">
+            <div className="flex shrink-0 rounded-lg border border-white/[0.08] p-0.5">
+              {(
+                [
+                  ["slide", `Slide ${String(focus + 1).padStart(2, "0")}`],
+                  ["set", "Whole set"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setScope(id)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1.5 text-[10.5px] font-medium transition-colors",
+                    scope === id
+                      ? "bg-white/[0.12] text-white"
+                      : "text-white/40 hover:text-white/70",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !busy && void send()}
+              placeholder={
+                scope === "slide"
+                  ? `Change this photo — "make it a misty valley at dawn"`
+                  : `A rule for every slide — "subtitles get one more word of warmth"`
+              }
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-white/90 placeholder:text-white/28 focus:outline-none"
+            />
+            <button
+              onClick={() => void send()}
+              disabled={!feedback.trim() || Boolean(busy)}
+              className="shrink-0 rounded-lg bg-white px-3.5 py-2 text-[12px] font-semibold text-black transition-opacity disabled:opacity-30"
+            >
+              {busy ? "Working…" : scope === "slide" ? "Regenerate" : "Amend system"}
+            </button>
+          </div>
+          {busy && <div className="mt-2 text-center text-[11.5px] text-white/40">{busy}</div>}
+          {flash && !busy && (
+            <div className="mt-2 text-center text-[11.5px] text-emerald-300/85">{flash}</div>
+          )}
+          {err && <div className="mt-2 text-center text-[11.5px] text-red-300/85">{err}</div>}
+        </div>
+
+        {/* Off-screen at full size: what the exporter copies out. Rendering
+            it here means the saved page can never drift from the studio. */}
+        <div
+          id="carousel-export-source"
+          aria-hidden
+          className="pointer-events-none absolute -left-[99999px] top-0"
+        >
+          {slides.map((sl, i) => (
+            <SlideCanvas
+              key={i}
+              slide={sl}
+              index={i}
+              total={slides.length}
+              width={1080}
+              identity={doc.identity}
+            />
+          ))}
+        </div>
+
+        {/* the deck */}
+        <div className="-mx-2 mt-5 flex gap-3 overflow-x-auto px-2 pb-4 pt-2">
+          {slides.map((s, i) => (
+            <button
+              key={i}
+              onClick={() => setFocus(i)}
+              className={cn(
+                "shrink-0 rounded-[12px] p-[2px] transition-all duration-200",
+                focus === i
+                  ? "scale-[1.04] bg-gradient-to-br from-[#ff765c] via-[#5db4ff] to-[#9378ff] shadow-[0_0_26px_-6px_rgba(93,180,255,0.55)]"
+                  : "bg-white/[0.06] hover:scale-[1.02] hover:bg-white/[0.16]",
+              )}
+            >
+              <SlideCanvas
+                slide={s}
+                index={i}
+                total={slides.length}
+                width={118}
+                identity={doc.identity}
+              />
+            </button>
+          ))}
+          <button
+            onClick={() => {
+              if (!doc || !focused) return;
+              const draft: CarouselSlide = {
+                kind: "tool",
+                theme: focused.theme === "white" ? "black" : "white",
+                bg: focused.bg,
+                logo: undefined,
+                quiet: "new slide",
+                loud: `Slide ${slides.length + 1}`,
+                face: LOUD_FACE_IDS[(focus + 1) % LOUD_FACE_IDS.length],
+                sub: "tell me what to say",
+                rail: true,
+              };
+              const next = carousels.map((c, ci) =>
+                ci !== activeIdx
+                  ? c
+                  : {
+                      ...c,
+                      slides: [
+                        ...c.slides.slice(0, focus + 1),
+                        draft,
+                        ...c.slides.slice(focus + 1),
+                      ],
+                    },
+              );
+              void saveCarousels(next);
+              setFocus(focus + 1);
+            }}
+            title="Add a slide after this one"
+            className="flex shrink-0 items-center justify-center rounded-[12px] border border-dashed border-white/[0.14] text-white/35 transition-colors hover:border-white/[0.3] hover:text-white/70"
+            style={{ width: 122, height: (1350 / 1080) * 118 + 4 }}
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </div>
+        <p className="mt-1.5 text-center text-[10.5px] text-white/22">
+          ← → to move through the deck
+        </p>
+      </div>
+
+      {/* the systems — small cards on a rail; one expands into the document */}
+      <div className="w-full shrink-0 xl:w-[280px]">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45">
+            Carousel systems
+          </div>
+          <button
+            onClick={() => setMakingSystem(true)}
+            title="New carousel system"
+            className="rounded-lg border border-white/[0.1] p-1.5 text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/85"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {modes.map((m) => {
+            const inUse = (doc?.system ?? "carousel") === m.id;
+            return (
+              <div
+                key={m.id}
+                className={cn(
+                  "rounded-xl border p-3 transition-colors",
+                  inUse
+                    ? "border-white/[0.2] bg-white/[0.05]"
+                    : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]",
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-semibold text-white/85">{m.name}</div>
+                    <div className="mt-0.5 text-[9.5px] text-white/35">
+                      {(m.bytes / 1024).toFixed(1)}KB{inUse ? " · in use here" : ""}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {m.id !== "carousel" && (
+                      <button
+                        onClick={() => void deleteSystem(m)}
+                        title="Delete this system"
+                        className="rounded-lg border border-white/[0.1] p-1.5 text-white/35 transition-colors hover:bg-red-500/[0.12] hover:text-red-300"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void openSystem(m)}
+                      title="Open this system"
+                      className="rounded-lg border border-white/[0.1] p-1.5 text-white/45 transition-colors hover:bg-white/[0.07] hover:text-white"
+                    >
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {m.palette.length > 0 && (
+                  <div className="mt-2 flex gap-1">
+                    {m.palette.slice(0, 6).map((hx) => (
+                      <span
+                        key={hx}
+                        title={hx}
+                        className="h-3.5 w-3.5 rounded-[3px] border border-white/[0.12]"
+                        style={{ background: hx }}
+                      />
+                    ))}
+                  </div>
+                )}
+                {!inUse && (
+                  <button
+                    onClick={() => void applySystem(m.id)}
+                    className="mt-2.5 w-full rounded-lg border border-white/[0.09] py-1.5 text-[10.5px] font-medium text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white/85"
+                  >
+                    Use for this deck
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* reference assets stay with the deck, not the system */}
+        <div className="mt-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+          <button
+            onClick={() => setAssetsOpen((v) => !v)}
+            className="flex w-full items-center justify-between text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45"
+          >
+            Reference assets · {assets.length}
+            <ChevronDown
+              className={cn("h-3.5 w-3.5 transition-transform", assetsOpen && "rotate-180")}
+            />
+          </button>
+          {assetsOpen && (
+            <div className="mt-2.5 grid grid-cols-6 gap-1.5">
+              {assets.map((a) => (
+                <div
+                  key={a.path}
+                  title={a.path.split("/").pop()}
+                  className={cn(
+                    "aspect-square overflow-hidden rounded-md border border-white/[0.07]",
+                    a.label === "mark" ? "bg-white/[0.85] p-1" : "bg-black/40",
+                  )}
+                >
+                  <img
+                    src={slideFileUrl(a.path)}
+                    alt=""
+                    loading="lazy"
+                    className="h-full w-full object-contain"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* one system, expanded — the document, full height, editable */}
+      {sysOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[92] flex justify-end bg-black/70 backdrop-blur-sm">
+            <div className="flex h-full w-full max-w-[620px] flex-col border-l border-white/[0.1] bg-[#0b0e15]">
+              <div className="flex items-center gap-2 border-b border-white/[0.07] p-4">
+                <InstagramMark className="h-4 w-4 shrink-0 text-[#E4405F]" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-semibold text-white/90">
+                    {sysOpen.name}
+                  </div>
+                  <div className="truncate font-mono text-[9.5px] text-white/30">
+                    {sysOpen.path}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setBeastEdit((v) => !v)}
+                  title={beastEdit ? "Read" : "Edit"}
+                  className={cn(
+                    "rounded-lg border p-2 transition-colors",
+                    beastEdit
+                      ? "border-white/[0.25] bg-white/[0.1] text-white"
+                      : "border-white/[0.08] text-white/45 hover:text-white/80",
+                  )}
+                >
+                  {beastEdit ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                </button>
+                {beastDirty && (
+                  <button
+                    onClick={() => void saveBeast(beast, sysOpen.id)}
+                    disabled={beastSaving}
+                    className="rounded-lg bg-white px-3 py-1.5 text-[11.5px] font-semibold text-black"
+                  >
+                    {beastSaving ? "Saving…" : "Save"}
+                  </button>
+                )}
+                <button
+                  onClick={() => setSysOpen(null)}
+                  className="rounded-lg border border-white/[0.1] p-2 text-white/50 hover:text-white"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {beastEdit ? (
+                  <textarea
+                    value={beast}
+                    onChange={(e) => {
+                      setBeast(e.target.value);
+                      setBeastDirty(true);
+                    }}
+                    spellCheck={false}
+                    className="h-full min-h-[70vh] w-full resize-none rounded-lg border border-white/[0.06] bg-black/30 p-3 font-mono text-[11.5px] leading-[1.7] text-white/75 focus:border-white/[0.16] focus:outline-none"
+                  />
+                ) : (
+                  <BeastDoc text={beast} />
+                )}
+              </div>
+              <p className="border-t border-white/[0.07] p-3.5 text-[10.5px] leading-relaxed text-white/30">
+                This document is the designer. Agents read the same file — change a rule here (or
+                send one with “Whole set”) and every future carousel obeys it.
+              </p>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {makingSystem && (
+        <CarouselSystemComposer
+          onClose={() => setMakingSystem(false)}
+          onCreate={async (brief) => {
+            setMakingSystem(false);
+            await newSystem(brief);
+          }}
+        />
+      )}
+
+      {creating && (
+        <NewCarouselComposer
+          beast={beast}
+          seedPool={carousels[0]?.slides.map((s) => s.bg) ?? []}
+          onClose={() => setCreating(false)}
+          onCreated={(docNew) => {
+            const next = [...carousels, docNew];
+            void saveCarousels(next);
+            setActiveIdx(next.length - 1);
+            setFocus(0);
+            setCreating(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── New carousel — a brief in, a deck out ───────────────────────────────────
+// The chat model writes the words (against the system document); photographs
+// start as loans from the seed set and get regenerated slide by slide.
+
+function NewCarouselComposer({
+  beast,
+  seedPool,
+  onClose,
+  onCreated,
+}: {
+  beast: string;
+  seedPool: string[];
+  onClose: () => void;
+  onCreated: (doc: CarouselDoc) => void;
+}) {
+  const [name, setName] = useState("");
+  const [brief, setBrief] = useState("");
+  const [model, setModel] = useState(AUTHOR_MODELS[0].id);
+  const [refs, setRefs] = useState<{ id: string; path: string; name: string }[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const attach = async (files: File[]) => {
+    if (!files.length) return;
+    setAttaching(true);
+    setErr(null);
+    try {
+      const encoded = await Promise.all(
+        files.map(
+          (file, index) =>
+            new Promise<{ name: string; type: string; dataUrl: string }>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () =>
+                resolve({
+                  name: file.name || `carousel-ref-${Date.now()}-${index}.png`,
+                  type: file.type,
+                  dataUrl: String(reader.result ?? ""),
+                });
+              reader.onerror = () => reject(new Error("could not read file"));
+              reader.readAsDataURL(file);
+            }),
+        ),
+      );
+      const r = await fetch("/__design_reference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({ files: encoded }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "upload failed");
+      setRefs((prev) => [...prev, ...d.items]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const create = async () => {
+    if (!name.trim() || !brief.trim() || status) return;
+    setErr(null);
+    setStatus("Asking the model for the slide copy…");
+    let slides: CarouselSlide[] | null = null;
+    try {
+      const instruction =
+        `You write Instagram carousel slide copy for this design system:\n\n${beast.slice(0, 3500)}\n\n` +
+        `Topic brief: ${brief.trim()}\n\n` +
+        `Return ONLY a JSON array (no commentary, no code fence) of 6 to 8 slides:\n` +
+        `first {"kind":"cover","l1":<small serif word>,"l2":<script hero word>,"chipNum":<2-digit count>,"chipSym":<2-3 char chip>,"l3":<loud caps word>},\n` +
+        `then tool slides {"kind":"tool","quiet":<category>,"loud":<name>,"face":<one of ${LOUD_FACE_IDS.join("|")}>,"sub":<plain-English job, 3-5 words>},\n` +
+        `last {"kind":"cta","kicker":<credit line>,"comment":"comment","loud":<one keyword>,"sub":<one line>,"cornerTl":["My name's","YOUR NAME"],"cornerTr":["Create","SMARTER"],"microTitle":"SUBSCRIBE TO YOUR CHANNEL","microSub":"so you don't build alone"}.\n` +
+        `Never reuse the previous slide's face.`;
+      const lane = AUTHOR_MODELS.find((m) => m.id === model) ?? AUTHOR_MODELS[0];
+      let text = "";
+      let terminal = false;
+      if (lane.id === "gpt") {
+        setStatus("GPT-5.6 is writing the deck…");
+        const r = await fetch("/__design_author", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+          body: JSON.stringify({ prompt: instruction }),
+        });
+        const d = await r.json();
+        if (r.ok && d.ok && d.text) {
+          text = d.text;
+          terminal = true;
+        }
+      } else {
+        const r = await fetch("/__claude_chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+          body: JSON.stringify({
+            prompt: instruction,
+            model: lane.model,
+            origin: "design-studio",
+            title: `Carousel: ${name.trim()}`,
+          }),
+        });
+        if (r.ok && r.body) {
+          const reader = r.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split("\n\n");
+            buffer = events.pop() ?? "";
+            for (const evt of events) {
+              let eventName = "chunk";
+              const dataLines: string[] = [];
+              for (const line of evt.split("\n")) {
+                if (line.startsWith("event: ")) eventName = line.slice(7).trim();
+                else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+              }
+              const data = dataLines.join("\n");
+              if (eventName === "chunk") {
+                text += data + "\n";
+                setStatus(`Claude is writing… ${text.length.toLocaleString()} chars`);
+              } else if (eventName === "done" || eventName === "error") terminal = true;
+            }
+          }
+        }
+      }
+      {
+        if (terminal) {
+          const match = text.match(/\[[\s\S]*\]/);
+          if (match) {
+            try {
+              const parsed = JSON.parse(match[0]);
+              if (Array.isArray(parsed) && parsed.length >= 3) {
+                slides = parsed.map((p: Record<string, unknown>, i: number) => ({
+                  ...(p as unknown as CarouselSlide),
+                  theme: (i % 2 === 0 ? "white" : "black") as "white" | "black",
+                  bg: seedPool[i % Math.max(seedPool.length, 1)] ?? "",
+                  rail: p.kind === "tool",
+                }));
+              }
+            } catch {
+              /* model returned prose — fall through to the template */
+            }
+          }
+        }
+      }
+    } catch {
+      /* author lane unavailable — the template below still works */
+    }
+    if (!slides) {
+      setStatus("Model unavailable — scaffolding a draft instead");
+      const words = name.trim().split(/\s+/);
+      slides = [
+        {
+          kind: "cover",
+          theme: "white",
+          bg: seedPool[0] ?? "",
+          l1: "the",
+          l2: (words[0] ?? "new").toLowerCase(),
+          chipNum: "01",
+          chipSym: "Ai",
+          l3: (words[1] ?? "SET").toUpperCase(),
+        },
+        ...[1, 2, 3].map((i) => ({
+          kind: "tool" as const,
+          theme: (i % 2 ? "black" : "white") as "white" | "black",
+          bg: seedPool[i % Math.max(seedPool.length, 1)] ?? "",
+          quiet: "draft slide",
+          loud: `Slide ${i + 1}`,
+          face: LOUD_FACE_IDS[i % LOUD_FACE_IDS.length],
+          sub: "write me in the brief",
+          rail: true,
+        })),
+      ];
+    }
+    const doc: CarouselDoc = {
+      id: `${name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")}-${Date.now().toString(36)}`,
+      name: name.trim(),
+      createdAt: new Date().toISOString().slice(0, 10),
+      source: `brief · ${AUTHOR_MODELS.find((m) => m.id === model)?.label ?? model}`,
+      brief: brief.trim(),
+      assets: refs.map((r2) => r2.path),
+      slides,
+    };
+    onCreated(doc);
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
+      <div
+        className="w-full max-w-[560px] rounded-2xl border border-white/[0.1] bg-[#0b0e15] p-6 shadow-2xl"
+        onPaste={(e) => {
+          const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+            f.type.startsWith("image/"),
+          );
+          if (files.length) {
+            e.preventDefault();
+            void attach(files);
+          }
+        }}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <InstagramMark className="h-5 w-5 text-[#E4405F]" />
+            <div className="text-[15px] font-semibold">New carousel</div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-white/40 hover:text-white">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+          Name
+        </label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Five tools that replaced my editor"
+          className="mb-4 w-full rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 text-[13.5px] text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+        />
+
+        <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+          The brief
+        </label>
+        <textarea
+          value={brief}
+          onChange={(e) => setBrief(e.target.value)}
+          placeholder="Who it's for, what each slide should argue, what the comment keyword is…"
+          className="mb-4 h-24 w-full resize-none rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 text-[13px] leading-relaxed text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+        />
+
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+            Written by
+          </span>
+          {AUTHOR_MODELS.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setModel(m.id)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11.5px] font-medium transition-colors",
+                model === m.id
+                  ? "border-white/[0.3] bg-white/[0.1] text-white"
+                  : "border-white/[0.08] text-white/45 hover:text-white/75",
+              )}
+            >
+              {m.id === "claude" ? (
+                <img src={claudeLogo} alt="" className="h-3.5 w-3.5" />
+              ) : (
+                <BrandMark brand={BRANDS.openai} className="h-3.5 w-3.5" />
+              )}
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => void attach(Array.from(e.target.files ?? []))}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={attaching}
+            className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11.5px] font-medium text-white/60 transition-colors hover:text-white/90"
+          >
+            <ImagePlus className="h-3.5 w-3.5" />
+            {attaching ? "Adding…" : "Attach references"}
+          </button>
+          <span className="text-[10px] text-white/25">or ⌘V to paste anywhere here</span>
+          {refs.map((r2) => (
+            <div
+              key={r2.id}
+              className="h-9 w-9 overflow-hidden rounded-md border border-white/[0.1]"
+            >
+              <img src={fileUrl(r2.id)} alt="" className="h-full w-full object-cover" />
+            </div>
+          ))}
+        </div>
+
+        {status && (
+          <div className="mb-3 overflow-hidden rounded-xl border border-white/[0.08]">
+            <div className="relative h-[92px]">
+              <div className="design-render-field absolute inset-0">
+                {RENDER_LOBES.slice(0, 3).map((lobe) => (
+                  <div
+                    key={lobe.cls}
+                    className={`design-render-lobe ${lobe.cls} absolute rounded-full mix-blend-screen`}
+                    style={{
+                      left: lobe.left,
+                      top: "-40%",
+                      width: "55%",
+                      height: "180%",
+                      background: `radial-gradient(circle at 50% 50%, ${lobe.color} 0%, ${lobe.color}00 64%)`,
+                      filter: "blur(26px)",
+                      opacity: 0.5,
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center text-[11.5px] font-medium text-white/75">
+                {status}
+              </div>
+            </div>
+          </div>
+        )}
+        {err && <div className="mb-3 text-[11.5px] text-red-300/85">{err}</div>}
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-white/[0.1] px-4 py-2.5 text-[12.5px] font-medium text-white/60 hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void create()}
+            disabled={!name.trim() || !brief.trim() || Boolean(status)}
+            className="rounded-xl bg-white px-5 py-2.5 text-[13px] font-semibold text-black transition-opacity disabled:opacity-30"
+          >
+            {status ? "Writing…" : "Create"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── Build Studio — the project wall: Claude designs, projects persist ──────
+
+// Step-one staging for the video: Claude is the only visible maker. Flip to
+// false and every connected engine returns to the cluster — nothing unwired.
+const STAGE_CLAUDE_ONLY = false;
+
+// The video reveals the carousel room later — hidden for now, never deleted.
+const STAGE_HIDE_CAROUSEL = false;
+
+// A swatch strip should lead with the colours that mean something. Sort by
+// chroma so ember and the accents come first and the greys queue behind.
+function colorfulFirst(hexes: string[]): string[] {
+  const chroma = (hx: string) => {
+    const n = parseInt(hx.slice(1), 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    return Math.max(r, g, b) - Math.min(r, g, b);
+  };
+  return [...hexes].sort((a, b) => chroma(b) - chroma(a));
+}
+
+type DesignSystemCard = {
+  file: string;
+  group: string;
+  name: string;
+  subtitle: string;
+  viewport: string;
+};
+type DesignSystemSummary = {
+  id: string;
+  name: string;
+  example?: string | null;
+  cards?: DesignSystemCard[];
+  colors: { name: string; value: string }[];
+  fonts: string[];
+  themes: string[];
+  components: string[];
+  skill: string;
+  addedAt: string;
+};
+
+// The Claude lanes — the same CLI and subscription as Claude Code itself.
+const CLAUDE_DESIGN_MODELS: StudioModel[] = [
+  { id: "claude-fable-5", label: "Claude Fable 5", kind: "image" },
+  { id: "claude-opus-5", label: "Claude Opus 5", kind: "image" },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5", kind: "image" },
+];
+
+// One row of /__claude_models — the exact catalog the home chat runs on.
+type ChatModelOption = { name: string; provider: string; tier?: string };
+
+// Where a model's bill lands. Same vocabulary as the Hermes section.
+function laneSource(provider: string): { label: string; tone: string; metered: boolean } {
+  const key = provider.toLowerCase();
+  if (key.includes("claude-code") || key === "claude")
+    return { label: "Claude plan", tone: "#34d399", metered: false };
+  if (key.includes("codex")) return { label: "Codex plan", tone: "#34d399", metered: false };
+  if (key.includes("openrouter") || key === "ccr")
+    return { label: "OpenRouter · metered", tone: "#fbbf24", metered: true };
+  return { label: provider, tone: "#a1a1aa", metered: true };
+}
+
+function prettyModelName(name: string): string {
+  const tail = name.split(/[/\\]/).pop() ?? name;
+  return tail
+    .replace(/-/g, " ")
+    .replace(/\b([a-z])/g, (m) => m.toUpperCase())
+    .replace(/\bGlm\b/, "GLM")
+    .replace(/\bGpt\b/, "GPT")
+    .replace(/\bDeepseek\b/, "DeepSeek");
+}
+
+// Whose model is this? Read the name first — the provider only says who
+// bills for it, and routing Claude through OpenRouter must not repaint it
+// with OpenRouter's mark.
+function ModelMark({
+  name,
+  provider,
+  className,
+}: {
+  name: string;
+  provider: string;
+  className?: string;
+}) {
+  const cls = className ?? "h-4 w-4";
+  // Read the NAME only. The provider is the lane that bills the call, and
+  // one of those lanes is literally called Claude Code Router — matching on
+  // it painted every OpenRouter model with Anthropic's mark.
+  const m = name.toLowerCase();
+  if (/claude|anthropic|opus|sonnet|fable|haiku/.test(m))
+    return <img src={claudeLogo} alt="" className={`${cls} object-contain`} aria-hidden />;
+  if (/codex/.test(m))
+    return <img src={codexLogo} alt="" className={`${cls} object-contain`} aria-hidden />;
+  if (/gemini|gemma/.test(m))
+    return <img src={geminiLogo} alt="" className={`${cls} object-contain`} aria-hidden />;
+  if (/gpt|openai|o[34]-/.test(m)) return <BrandMark brand={BRANDS.openai} className={cls} />;
+  return <BrandMark brand={brandForModel(name, provider)} className={cls} />;
+}
+
+// Plans before metered, and the house lane first: this is the default order the user
+// reaches for them in, not alphabetical accident.
+const LANE_ORDER = ["claude-code", "claude", "codex", "openrouter", "ccr"];
+function laneRank(provider: string): number {
+  const key = provider.toLowerCase();
+  const i = LANE_ORDER.findIndex((l) => key.includes(l));
+  return i === -1 ? LANE_ORDER.length : i;
+}
+
+// The canvas is chosen, never implied. Claude designs to these exact frames.
+const BUILD_FORMATS = [
+  { id: "auto", label: "Auto", w: 0, h: 0, ar: "16/10" },
+  { id: "page", label: "Page", w: 1440, h: 900, ar: "16/10" },
+  { id: "slide", label: "Slide", w: 1920, h: 1080, ar: "16/9" },
+  { id: "phone", label: "Phone", w: 390, h: 844, ar: "390/844" },
+  { id: "square", label: "Square", w: 1080, h: 1080, ar: "1/1" },
+  { id: "poster", label: "Poster", w: 1080, h: 1350, ar: "4/5" },
+] as const;
+
+type BuildFormat = (typeof BUILD_FORMATS)[number]["id"];
+type DesignProject = {
+  id: string;
+  name: string;
+  format: string;
+  model: string;
+  system: string | null;
+  ts: number;
+};
+
+// Serve projects as a tree, not a lone file: an exported deck's images sit
+// beside its page and must resolve relatively.
+const projectUrl = (id: string) => `/__design_project_asset/${encodeURIComponent(id)}/index.html`;
+
+function formatAspect(id: string): string {
+  return BUILD_FORMATS.find((f) => f.id === id)?.ar ?? "16/10";
+}
+
+const WALL_PROMPT = `When you build anything visual for me — a page, a deck, a poster, a UI — save it as a single self-contained index.html inside its own folder in ~/Desktop/designs/, for example ~/Desktop/designs/my-project-name/index.html (inline all CSS and JS, no external files). That folder is my design wall: anything saved there shows up automatically in my Claude Code OS Design room, where I can open, preview and share it.`;
+
+function BuildStudio({ active = true }: { active?: boolean }) {
+  const roomRef = useRef<HTMLDivElement>(null);
+  const [roomH, setRoomH] = useState<number | null>(null);
+  // Measure, don't guess: the room's top edge moves with the page header and
+  // the studio picker, so a fixed calc() puts the composer just below the fold
+  // at some window sizes — which is the exact bug this fixes.
+  useEffect(() => {
+    // While the Studio tab is display:none the rect reads 0 and the room gets
+    // sized as if it started at the top of the page — the composer then opens
+    // below the fold. Only measure while actually visible.
+    if (!active) return;
+    const fit = () => {
+      const el = roomRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const top = rect.top + window.scrollY;
+      // Subtract everything below the room too (card pb-6 + page pb-10),
+      // otherwise the page scrolls by exactly that much and the composer
+      // slides over the wall.
+      setRoomH(Math.max(340, window.innerHeight - top - 76));
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    const t = window.setTimeout(fit, 400);
+    return () => {
+      window.removeEventListener("resize", fit);
+      window.clearTimeout(t);
+    };
+  }, [active]);
+  const [engineId] = useState<string>("claude");
+  const [chatModels, setChatModels] = useState<ChatModelOption[]>(
+    CLAUDE_DESIGN_MODELS.map((m) => ({ name: m.id, provider: "claude-code" })),
+  );
+  const [modelId, setModelId] = useState<string>("claude-fable-5");
+  const [modelOpen, setModelOpen] = useState(false);
+  const [format] = useState<BuildFormat>("auto");
+  const [effort, setEffort] = useState<"low" | "medium" | "high" | "max">("high");
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [stream, setStream] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [projects, setProjects] = useState<DesignProject[]>([]);
+  const [projectsDir, setProjectsDir] = useState<string>("");
+  const [open, setOpen] = useState<DesignProject | null>(null);
+  const [systems, setSystems] = useState<DesignSystemSummary[]>([]);
+  const [systemId, setSystemId] = useSticky<string | null>("systemId", null);
+  const [systemOpen, setSystemOpen] = useState(false);
+  const [systemBusy, setSystemBusy] = useState(false);
+  const [inspect, setInspect] = useState<DesignSystemSummary | null>(null);
+  const [detected, setDetected] = useState<{ path: string; name: string } | null>(null);
+  const [authoring, setAuthoring] = useState(false);
+  const [renaming, setRenaming] = useState<DesignSystemSummary | null>(null);
+  const zipRef = useRef<HTMLInputElement>(null);
+  const popRef = useDismiss(modelOpen, () => setModelOpen(false));
+  const sysRef = useDismiss(systemOpen, () => setSystemOpen(false));
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const projR = await (await fetch("/__design_project")).json();
+        if (projR.ok) setProjects(projR.projects);
+        const sysR = await (await fetch("/__design_system")).json();
+        if (sysR.ok) {
+          setSystems(sysR.systems);
+          if (!sysR.systems.length) {
+            // Nothing imported yet — look around before asking the user to.
+            const scan = await (await fetch("/__design_system?scan=1")).json();
+            if (scan.ok && scan.found?.length) setDetected(scan.found[0]);
+          }
+        }
+      } catch {
+        setErr("couldn't reach the room's backend");
+      }
+    })();
+  }, []);
+
+  // The same catalog the home chat runs on: plan lanes + the OpenRouter
+  // roster through ccr, one endpoint. And which makers this machine has
+  // already signed in to — real detection, not a hardcoded list.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await (await fetch("/__claude_models")).json();
+        const opts: ChatModelOption[] = [];
+        for (const group of r?.catalog ?? []) {
+          for (const m of group?.models ?? []) {
+            opts.push({
+              name: String(m.name),
+              provider: String(group.provider ?? "ccr"),
+              tier: m.tier ? String(m.tier) : undefined,
+            });
+          }
+        }
+        if (opts.length) {
+          setChatModels(opts);
+          // Only choose FOR the operator when their remembered pick is gone.
+          setModelId((prev) => {
+            if (prev && opts.some((o) => o.name === prev)) return prev;
+            const fable = opts.find(
+              (o) => /fable/i.test(o.name) && !laneSource(o.provider).metered,
+            );
+            return (fable ?? opts[0]).name;
+          });
+        }
+      } catch {
+        /* fallback trio already in state */
+      }
+    })();
+  }, [setModelId]);
+
+  const model = chatModels.find((m) => m.name === modelId) ?? null;
+  const system = systems.find((x) => x.id === systemId) ?? null;
+
+  const importSystem = async (source: { file?: File; path?: string; name?: string }) => {
+    setSystemBusy(true);
+    setErr(null);
+    try {
+      let payload: Record<string, unknown>;
+      if (source.file) {
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result ?? "").split(",")[1] ?? "");
+          reader.onerror = () => reject(new Error("could not read the zip"));
+          reader.readAsDataURL(source.file!);
+        });
+        payload = {
+          name: source.file.name.replace(/\.zip$/i, "").replace(/\s*\(\d+\)\s*$/, ""),
+          zipBase64: b64,
+        };
+      } else {
+        payload = { name: source.name, importPath: source.path };
+      }
+      const r = await fetch("/__design_system", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "import failed");
+      setSystems((prev) => [...prev, d.system]);
+      setSystemId(d.system.id);
+      setDetected(null);
+      setInspect(d.system);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSystemBusy(false);
+    }
+  };
+
+  const removeSystem = async (id: string) => {
+    await fetch("/__design_system", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+      body: JSON.stringify({ remove: id }),
+    });
+    setSystems((prev) => prev.filter((x) => x.id !== id));
+    if (systemId === id) setSystemId(null);
+  };
+
+  const createSystem = async (payload: {
+    name: string;
+    colors: { name: string; value: string }[];
+    fonts: string[];
+    notes: string;
+  }) => {
+    setSystemBusy(true);
+    try {
+      const r = await fetch("/__design_system", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({ create: payload }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "could not create the system");
+      setSystems((prev) => [...prev, d.system]);
+      setSystemId(d.system.id);
+      setAuthoring(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSystemBusy(false);
+    }
+  };
+
+  const renameSystem = async (id: string, name: string) => {
+    const r = await fetch("/__design_system", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+      body: JSON.stringify({ rename: { id, name } }),
+    });
+    const d = await r.json();
+    if (d.ok) setSystems((prev) => prev.map((x) => (x.id === id ? d.system : x)));
+    setRenaming(null);
+  };
+
+  const systemForClaude = system
+    ? `Follow this design system exactly.\nColors (CSS tokens): ${system.colors
+        .map((c) => `${c.name}: ${c.value}`)
+        .join(
+          ", ",
+        )}.\nFonts: ${system.fonts.join(", ")}.\nComponent vocabulary: ${system.components.join(
+        ", ",
+      )}.\n${system.skill ? `House rules:\n${system.skill.slice(0, 1500)}\n` : ""}\n`
+    : "";
+
+  const go = useCallback(async () => {
+    if (!model || !prompt.trim() || busy) return;
+    const ask = prompt.trim();
+    const frame = BUILD_FORMATS.find((f) => f.id === format) ?? BUILD_FORMATS[0];
+    const slug = `${ask
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 48)}-${Date.now().toString(36)}`;
+    // A literal ~ never expands on Windows, and the Desktop may be
+    // redirected into OneDrive — use the folder the server actually reads.
+    const sepChar = projectsDir.includes("\\") ? "\\" : "/";
+    const target = projectsDir
+      ? `${projectsDir}${sepChar}${slug}${sepChar}index.html`
+      : `designs${sepChar}${slug}${sepChar}index.html`;
+    setBusy(true);
+    setErr(null);
+    setStream("Claude is opening the workshop…");
+    try {
+      const frameLine =
+        frame.id === "auto"
+          ? `Choose the canvas that fits the ask best (a full page, a 16:9 slide, a 390px-wide phone screen, a square, or a 4:5 poster) and compose for it.`
+          : `Design for a ${frame.label.toLowerCase()} at exactly ${frame.w}×${frame.h}px — compose the layout for that frame.`;
+      const instruction =
+        systemForClaude +
+        `You are designing at your full standard — real typographic scale, deliberate ` +
+        `spacing, true craft; never placeholder-grade output. ${frameLine}\n` +
+        `Build a complete single-file HTML page (inline CSS and JS, no external ` +
+        `resources) and use your Write tool to save it to ${target} — create the ` +
+        `folder if needed. Iterate on the file until it is genuinely beautiful, ` +
+        `then reply with just: SHIPPED\n\nThe brief: ${ask}`;
+      const r = await fetch("/__claude_chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({
+          prompt: instruction,
+          model: modelId,
+          provider: model?.provider,
+          yolo: true,
+          effort,
+          origin: "design-studio",
+          title: `Design: ${ask.slice(0, 48)}`,
+        }),
+      });
+      if (!r.ok || !r.body) throw new Error("Claude lane unavailable");
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let text = "";
+      let terminal = false;
+      let sawError: string | null = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const evt of events) {
+          let eventName = "chunk";
+          const dataLines: string[] = [];
+          for (const line of evt.split("\n")) {
+            if (line.startsWith("event: ")) eventName = line.slice(7).trim();
+            else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+          }
+          const data = dataLines.join("\n");
+          if (eventName === "chunk") {
+            text += data + "\n";
+            setStream(`Streaming the design… ${text.length.toLocaleString()} chars`);
+          } else if (eventName === "error") {
+            sawError = data || "the run failed";
+            terminal = true;
+          } else if (eventName === "done") terminal = true;
+        }
+      }
+      if (sawError) throw new Error(sawError);
+      if (!terminal) throw new Error("the stream ended before the design finished");
+      // The harness writes the file itself; the wall is the source of truth.
+      const listed = await (await fetch("/__design_project")).json();
+      const landed = (listed.projects ?? []).find((pr: DesignProject) => pr.id === slug);
+      if (landed) {
+        await fetch("/__design_project", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+          body: JSON.stringify({
+            annotate: {
+              id: slug,
+              name: ask,
+              format: frame.id === "auto" ? "page" : format,
+              model: model ? prettyModelName(model.name) : "Claude",
+              system: system?.name ?? null,
+            },
+          }),
+        });
+        const fresh = await (await fetch("/__design_project")).json();
+        if (fresh.ok) setProjects(fresh.projects);
+        setPrompt("");
+      } else {
+        // Fall back to anything page-shaped in the reply itself.
+        const fence = text.match(/```html\s*([\s\S]*?)```/i)?.[1];
+        const doc =
+          fence ??
+          text.match(/<!doctype[\s\S]*<\/html>/i)?.[0] ??
+          text.match(/<html[\s\S]*<\/html>/i)?.[0];
+        if (!doc)
+          throw new Error(
+            `Claude finished but no page landed in ${projectsDir || "your designs folder"} — "${text.trim().slice(0, 140)}…"`,
+          );
+        const save = await fetch("/__design_project", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+          body: JSON.stringify({
+            name: ask,
+            format: frame.id === "auto" ? "page" : format,
+            html: doc.trim(),
+            model: model ? prettyModelName(model.name) : "Claude",
+            system: system?.name ?? null,
+          }),
+        });
+        const saved = await save.json();
+        if (!save.ok || !saved.ok) throw new Error(saved.error || "could not save the project");
+        setProjects((prev) => [saved.project, ...prev]);
+        setPrompt("");
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setStream(null);
+    }
+  }, [model, modelId, prompt, busy, format, effort, systemForClaude, system, projectsDir]);
+
+  return (
+    <div className="relative rounded-2xl border border-white/[0.07] bg-[#07090f] px-4 pb-6 pt-6 md:px-6">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl opacity-[0.16]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
+          backgroundSize: "44px 44px",
+          maskImage: "radial-gradient(ellipse at 50% 0%, black, transparent 78%)",
+        }}
+      />
+      <div
+        ref={roomRef}
+        className="relative flex flex-col"
+        style={{ height: roomH ? `${roomH}px` : "60vh" }}
+      >
+
+        {authoring &&
+          createPortal(
+            <SystemComposer
+              busy={systemBusy}
+              onClose={() => setAuthoring(false)}
+              onCreate={(payload) => void createSystem(payload)}
+            />,
+            document.body,
+          )}
+
+        {renaming &&
+          createPortal(
+            <div className="fixed inset-0 z-[98] grid place-items-center bg-black/75 p-6 backdrop-blur-sm">
+              <div className="w-full max-w-[420px] rounded-2xl border border-white/[0.12] bg-[#0b0e15] p-6">
+                <div className="mb-4 text-[15px] font-semibold">Rename system</div>
+                <input
+                  autoFocus
+                  defaultValue={renaming.name}
+                  id="ds-rename-input"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter")
+                      void renameSystem(renaming.id, (e.target as HTMLInputElement).value);
+                    if (e.key === "Escape") setRenaming(null);
+                  }}
+                  className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-4 py-3 text-[14px] text-white outline-none focus:border-white/[0.3]"
+                />
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    onClick={() => setRenaming(null)}
+                    className="rounded-xl border border-white/[0.12] px-4 py-2.5 text-[12.5px] text-white/55 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      const el = document.getElementById(
+                        "ds-rename-input",
+                      ) as HTMLInputElement | null;
+                      if (el) void renameSystem(renaming.id, el.value);
+                    }}
+                    className="rounded-xl bg-white px-5 py-2.5 text-[13px] font-semibold text-black"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
+
+        {detected &&
+          createPortal(
+            <div className="fixed inset-0 z-[97] grid place-items-center bg-black/80 p-6 backdrop-blur-md">
+              <div className="relative w-full max-w-[560px] overflow-hidden rounded-3xl border border-white/[0.12] bg-[#0b0e15] p-8 text-center shadow-[0_60px_160px_-40px_rgba(0,0,0,1)]">
+                <div
+                  aria-hidden
+                  className="design-render-field absolute inset-x-0 top-0 h-[130px] opacity-60"
+                >
+                  {RENDER_LOBES.slice(0, 3).map((lobe) => (
+                    <div
+                      key={lobe.cls}
+                      className={`design-render-lobe ${lobe.cls} absolute rounded-full mix-blend-screen`}
+                      style={{
+                        left: lobe.left,
+                        top: "-70%",
+                        width: "55%",
+                        height: "200%",
+                        background: `radial-gradient(circle at 50% 50%, ${lobe.color} 0%, ${lobe.color}00 64%)`,
+                        filter: "blur(30px)",
+                        opacity: 0.5,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="relative">
+                  <div className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-white/[0.14] bg-white/[0.05]">
+                    <ScanSearch className="h-6 w-6 text-white/80" />
+                  </div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300/80">
+                    Design system found
+                  </div>
+                  <div className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-white">
+                    {detected.name}
+                  </div>
+                  <div className="mx-auto mt-2 max-w-[380px] truncate font-mono text-[10.5px] text-white/35">
+                    {detected.path}
+                  </div>
+                  <p className="mx-auto mt-4 max-w-[400px] text-[13px] leading-relaxed text-white/50">
+                    A full Claude Design export — tokens, components, specimen pages. Add it and
+                    every build in this room follows it.
+                  </p>
+                  <div className="mt-7 flex justify-center gap-3">
+                    <button
+                      onClick={() => setDetected(null)}
+                      className="rounded-xl border border-white/[0.12] px-5 py-3 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
+                    >
+                      Not now
+                    </button>
+                    <button
+                      onClick={() =>
+                        void importSystem({ path: detected.path, name: detected.name })
+                      }
+                      disabled={systemBusy}
+                      className="rounded-xl bg-white px-7 py-3 text-[13.5px] font-semibold text-black transition-transform hover:-translate-y-0.5 disabled:opacity-50"
+                    >
+                      {systemBusy ? "Unpacking…" : "Add the system"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
+
+        {err && !busy && (
+          <div className="mb-4 rounded-xl border border-red-400/25 bg-red-500/[0.08] px-4 py-3 text-[12.5px] leading-relaxed text-red-100">
+            {err}
+          </div>
+        )}
+
+        {/* the wall scrolls inside the room so the composer never leaves.
+            It runs under the floating composer — the pb keeps the last row
+            reachable above the glass. */}
+        <div className="min-h-0 flex-1 overflow-y-auto pb-44 pr-1">
+          {/* the wall — every project this room has built, live */}
+          {(projects.length > 0 || busy) && (
+            <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
+              {busy && (
+                <div className="relative aspect-[16/10]">
+                  <div className="absolute inset-0">
+                    <RenderPlaceholder index={0} total={1} />
+                  </div>
+                </div>
+              )}
+              {projects.map((proj) => (
+                <div
+                  key={proj.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setOpen(proj)}
+                  onKeyDown={(e) => e.key === "Enter" && setOpen(proj)}
+                  className="group/proj relative aspect-[16/10] cursor-pointer overflow-hidden rounded-xl border border-white/[0.08] bg-[#0a0d13] text-left transition-all hover:border-white/[0.2] hover:shadow-[0_18px_50px_-30px_rgba(93,180,255,0.4)]"
+                >
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!window.confirm(`Delete "${proj.name}" from ~/Desktop/designs?`)) return;
+                      await fetch("/__design_project", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "X-Claude-OS-Token": await studioToken(),
+                        },
+                        body: JSON.stringify({ remove: proj.id }),
+                      });
+                      setProjects((prev) => prev.filter((x) => x.id !== proj.id));
+                    }}
+                    title="Delete project"
+                    className="absolute right-2 top-2 z-10 hidden rounded-md bg-black/70 p-1.5 text-white/60 backdrop-blur transition-colors hover:text-red-300 group-hover/proj:block"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                  {/* cover, not contain: the preview fills the card's full
+                      width and portrait work crops top/bottom — no letterbox
+                      bars around posters. */}
+                  <div className="absolute inset-0 grid place-items-center overflow-hidden">
+                    <div
+                      className="relative w-full shrink-0 overflow-hidden"
+                      style={{ aspectRatio: formatAspect(proj.format) }}
+                    >
+                      <iframe
+                        title={proj.name}
+                        src={projectUrl(proj.id)}
+                        tabIndex={-1}
+                        className="pointer-events-none h-[250%] w-[250%] origin-top-left border-0 bg-[#0a0d13]"
+                        style={{ transform: "scale(0.4)" }}
+                      />
+                    </div>
+                  </div>
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-8">
+                    <div className="truncate text-[11.5px] font-medium text-white/90">
+                      {proj.name}
+                    </div>
+                    <div className="text-[9.5px] text-white/45">
+                      {proj.format} · {proj.model}
+                      {proj.system ? ` · ${proj.system}` : ""}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {projects.length === 0 && !busy && (
+            <div className="mb-6 mt-10 text-center text-[12px] text-white/25">
+              The wall is empty. Describe the first thing to build.
+            </div>
+          )}
+        </div>
+
+        {/* the composer — floats over the wall's bottom edge as glass, so the
+            room reads full-height. Absolute in the room, never sticky:
+            sticky rode the PAGE scroll and slid the bar over the cards. */}
+        <div className="absolute inset-x-0 bottom-0 z-30 mx-auto w-full max-w-[1160px]">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-[8%] -bottom-4 top-5 rounded-[40px] opacity-45 blur-3xl"
+            style={{
+              background:
+                "linear-gradient(100deg, rgba(255,116,87,0.35), rgba(244,197,91,0.2), rgba(80,218,190,0.22), rgba(119,101,255,0.35))",
+            }}
+          />
+          <div
+            className={cn(
+              prompt.trim() && model ? "design-spectrum-live" : "design-spectrum-frame",
+              "relative mx-auto max-w-[1160px] rounded-[24px] p-[1.5px]",
+            )}
+            style={{
+              background:
+                "linear-gradient(115deg, #ff7959 0%, #f4ca61 21%, #5cddc1 43%, #7694ff 66%, #d879ff 83%, #ff7959 100%)",
+              backgroundSize: "240% 240%",
+              boxShadow:
+                "0 28px 80px -30px rgba(3,5,12,0.98), 0 0 34px -15px rgba(116,148,255,0.75)",
+            }}
+          >
+            <div
+              className="relative rounded-[22.5px] px-3 py-2.5 backdrop-blur-2xl md:px-4 md:py-3"
+              style={{
+                // dark fill so the rainbow frame reads as a border, not a
+                // wash — the bar still floats over the wall
+                background: "linear-gradient(145deg, rgba(27,32,45,0.97), rgba(18,23,34,0.97))",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.09)",
+              }}
+            >
+              <div className="mb-1.5 flex flex-wrap items-center gap-1.5 border-b border-white/[0.06] pb-1.5">
+                <div className="relative" ref={popRef}>
+                  <button
+                    onClick={() => setModelOpen((v) => !v)}
+                    className="flex h-8 items-center gap-2 rounded-[10px] border border-white/[0.11] bg-white/[0.04] px-2.5 text-[12px] font-medium text-white/90 transition-colors hover:bg-white/[0.08]"
+                  >
+                    {model ? (
+                      <>
+                        <ModelMark
+                          name={model.name}
+                          provider={model.provider}
+                          className="h-4 w-4"
+                        />
+                        {prettyModelName(model.name)}
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-wider"
+                          style={{
+                            color: laneSource(model.provider).tone,
+                            background: `${laneSource(model.provider).tone}1a`,
+                          }}
+                        >
+                          {laneSource(model.provider).label}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-white/40">Loading models…</span>
+                    )}
+                    <ChevronDown className="h-3 w-3 text-white/40" />
+                  </button>
+                  {modelOpen && (
+                    <div className="absolute bottom-full left-0 z-40 mb-2 max-h-[420px] w-[340px] overflow-y-auto rounded-xl border border-white/[0.12] bg-[#0d1017] p-1.5 shadow-2xl">
+                      {Object.entries(
+                        chatModels.reduce<Record<string, ChatModelOption[]>>((acc, m) => {
+                          (acc[m.provider] ??= []).push(m);
+                          return acc;
+                        }, {}),
+                      )
+                        .sort(([a], [b]) => laneRank(a) - laneRank(b))
+                        .map(([provider, group]) => (
+                          <div key={provider} className="mb-1">
+                            <div
+                              className="flex items-center gap-1.5 px-3 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.16em]"
+                              style={{ color: laneSource(provider).tone }}
+                            >
+                              <span
+                                className="h-1.5 w-1.5 rounded-full"
+                                style={{ background: laneSource(provider).tone }}
+                              />
+                              {laneSource(provider).label}
+                            </div>
+                            {group.map((m) => (
+                              <button
+                                key={`${m.provider}/${m.name}`}
+                                onClick={() => {
+                                  setModelId(m.name);
+                                  setModelOpen(false);
+                                }}
+                                className={cn(
+                                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12.5px] transition-colors",
+                                  m.name === modelId && m.provider === model?.provider
+                                    ? "bg-white/[0.1] text-white"
+                                    : "text-white/60 hover:bg-white/[0.05]",
+                                )}
+                              >
+                                <ModelMark
+                                  name={m.name}
+                                  provider={m.provider}
+                                  className="h-4 w-4 shrink-0"
+                                />
+                                <span className="min-w-0 flex-1 truncate">
+                                  {prettyModelName(m.name)}
+                                </span>
+                                {m.tier && (
+                                  <span className="text-[9px] uppercase tracking-wider text-white/25">
+                                    {m.tier}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* the design system rides in the bar, like a style */}
+                <div className="relative" ref={sysRef}>
+                  <button
+                    onClick={() => setSystemOpen((v) => !v)}
+                    className={cn(
+                      "flex h-8 items-center gap-2 rounded-[10px] border px-2.5 text-[12px] font-medium transition-colors",
+                      system
+                        ? "border-white/[0.2] bg-white/[0.07] text-white"
+                        : "border-white/[0.11] bg-white/[0.02] text-white/55 hover:text-white/85",
+                    )}
+                  >
+                    {system ? (
+                      <>
+                        <span className="flex -space-x-1">
+                          {colorfulFirst(system.colors.map((c) => c.value))
+                            .slice(0, 4)
+                            .map((v) => (
+                              <span
+                                key={v}
+                                className="h-3 w-3 rounded-full border border-black/40"
+                                style={{ background: v }}
+                              />
+                            ))}
+                        </span>
+                        {system.name}
+                      </>
+                    ) : (
+                      <>
+                        <Palette className="h-3.5 w-3.5" />
+                        System
+                      </>
+                    )}
+                    <ChevronDown className="h-3 w-3 text-white/40" />
+                  </button>
+                  {systemOpen && (
+                    <div className="absolute bottom-full left-0 z-40 mb-2 w-[300px] rounded-xl border border-white/[0.12] bg-[#0d1017] p-1.5 shadow-2xl">
+                      <button
+                        onClick={() => {
+                          setSystemId(null);
+                          setSystemOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center rounded-lg px-3 py-2 text-left text-[12.5px]",
+                          !systemId
+                            ? "bg-white/[0.1] text-white"
+                            : "text-white/60 hover:bg-white/[0.05]",
+                        )}
+                      >
+                        None — freestyle
+                      </button>
+                      {systems.map((sys) => (
+                        <div
+                          key={sys.id}
+                          className={cn(
+                            "group/sys flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12.5px] transition-colors",
+                            systemId === sys.id
+                              ? "bg-white/[0.1] text-white"
+                              : "text-white/60 hover:bg-white/[0.05]",
+                          )}
+                        >
+                          <button
+                            onClick={() => {
+                              setSystemId(sys.id);
+                              setSystemOpen(false);
+                            }}
+                            className="flex min-w-0 flex-1 items-center gap-2"
+                          >
+                            <span className="flex -space-x-1">
+                              {colorfulFirst(sys.colors.map((c) => c.value))
+                                .slice(0, 4)
+                                .map((v) => (
+                                  <span
+                                    key={v}
+                                    className="h-3 w-3 rounded-full border border-black/40"
+                                    style={{ background: v }}
+                                  />
+                                ))}
+                            </span>
+                            <span className="min-w-0 truncate">{sys.name}</span>
+                          </button>
+                          <button
+                            onClick={() => setRenaming(sys)}
+                            title="Rename"
+                            className="hidden rounded p-1 text-white/35 hover:text-white group-hover/sys:block"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setInspect(sys)}
+                            title="Inspect the system"
+                            className="rounded p-1 text-white/35 hover:text-white"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => void removeSystem(sys.id)}
+                            title="Remove"
+                            className="hidden rounded p-1 text-white/35 hover:text-red-300 group-hover/sys:block"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      <div className="my-1 border-t border-white/[0.07]" />
+                      <button
+                        onClick={async () => {
+                          const scan = await (await fetch("/__design_system?scan=1")).json();
+                          if (scan.ok && scan.found?.length) setDetected(scan.found[0]);
+                          else
+                            setErr(
+                              "No design systems found in Downloads or on the Desktop. Export one from Claude Design, or write a system by hand.",
+                            );
+                          setSystemOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-white/55 hover:bg-white/[0.05]"
+                      >
+                        <ScanSearch className="h-3.5 w-3.5" />
+                        Scan this computer for design systems
+                      </button>
+                      <button
+                        onClick={() => {
+                          zipRef.current?.click();
+                          setSystemOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-white/55 hover:bg-white/[0.05]"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add a zip…
+                      </button>
+                      <button
+                        onClick={() => {
+                          setAuthoring(true);
+                          setSystemOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-white/55 hover:bg-white/[0.05]"
+                      >
+                        <Palette className="h-3.5 w-3.5" />
+                        Write a new system…
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <input
+                  ref={zipRef}
+                  type="file"
+                  accept=".zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void importSystem({ file: f });
+                    e.target.value = "";
+                  }}
+                />
+
+                {/* how hard Claude thinks — rides the chat lane's effort knob */}
+                <div className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-[10px] border border-white/[0.11] bg-black/15 p-1">
+                  <span className="pl-2 pr-1 font-mono text-[8.5px] uppercase tracking-[0.16em] text-white/30">
+                    Effort
+                  </span>
+                  {(["low", "medium", "high", "max"] as const).map((lvl) => (
+                    <button
+                      key={lvl}
+                      onClick={() => setEffort(lvl)}
+                      aria-pressed={effort === lvl}
+                      className={cn(
+                        "inline-flex h-6.5 items-center rounded-[7px] px-2 text-[10.5px] capitalize transition-colors",
+                        effort === lvl
+                          ? "bg-white/[0.1] font-medium text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]"
+                          : "text-white/38 hover:bg-white/[0.05] hover:text-white/74",
+                      )}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[16px] border border-white/[0.13] bg-[#121722]/82 px-2.5 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.055),0_10px_28px_-24px_rgba(0,0,0,0.9)] transition-colors focus-within:border-[#aeb6ff]/45">
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      void go();
+                    }
+                  }}
+                  rows={2}
+                  aria-label="Describe what to build"
+                  placeholder="Describe what to build — a pricing page, a dashboard, a poster…"
+                  className="w-full resize-none border-0 bg-transparent px-1 py-1.5 text-[14px] leading-5 text-white outline-none placeholder:text-white/30 md:text-[14.5px]"
+                  style={{ minHeight: 54, maxHeight: 64 }}
+                />
+              </div>
+
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <div className="min-w-0 flex-1 truncate px-1 text-[11.5px] text-white/45">
+                  {stream ?? (busy ? "Working…" : null)}
+                </div>
+                <div className="ml-auto flex shrink-0 items-center gap-2.5">
+                  <div className="relative inline-flex min-h-[42px] items-center rounded-[11px] border border-white/[0.09] bg-black/15 px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+                    <div className="min-w-[70px] text-left">
+                      <div className="text-[8px] font-medium uppercase tracking-[0.13em] text-white/28">
+                        This run
+                      </div>
+                      <div
+                        className="mt-0.5 text-[11.5px] font-semibold tabular-nums"
+                        style={{ color: model ? laneSource(model.provider).tone : "#a1a1aa" }}
+                      >
+                        {model ? laneSource(model.provider).label : "—"}
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    className={cn(
+                      "design-spectrum-frame relative isolate shrink-0 rounded-[15px] p-px transition-all duration-300",
+                      (!prompt.trim() || !model || busy) && "opacity-45",
+                    )}
+                    style={{
+                      background:
+                        "linear-gradient(115deg, #ff7959, #f4ca61, #5cddc1, #7694ff, #d879ff, #ff7959)",
+                      backgroundSize: "240% 240%",
+                    }}
+                  >
+                    <button
+                      onClick={() => void go()}
+                      disabled={!prompt.trim() || !model || busy}
+                      className="rounded-[14px] bg-[#10141f] px-5 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#171d2c] disabled:cursor-not-allowed"
+                    >
+                      {busy ? "Making…" : "Make it"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* project viewer — the page, full size, with a real localhost door */}
+      {open &&
+        createPortal(
+          <div className="fixed inset-0 z-[95] flex flex-col bg-black/85 p-4 backdrop-blur-sm md:p-8">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-semibold text-white">{open.name}</div>
+                <div className="text-[10.5px] text-white/40">
+                  {open.format} · {open.model}
+                  {open.system ? ` · ${open.system}` : ""} · sandboxed
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <a
+                  href={projectUrl(open.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg bg-white px-3.5 py-2 text-[12px] font-semibold text-black"
+                >
+                  Open in browser
+                </a>
+                <button
+                  onClick={() => {
+                    void fetch("/__design_project", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                    });
+                  }}
+                  className="hidden"
+                />
+                <button
+                  onClick={async () => {
+                    await fetch("/__design_project", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "X-Claude-OS-Token": await studioToken(),
+                      },
+                      body: JSON.stringify({ remove: open.id }),
+                    });
+                    setProjects((prev) => prev.filter((x) => x.id !== open.id));
+                    setOpen(null);
+                  }}
+                  title="Delete project"
+                  className="rounded-lg border border-white/[0.15] p-2 text-white/50 hover:text-red-300"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setOpen(null)}
+                  className="rounded-lg border border-white/[0.15] p-2 text-white/60 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <iframe
+              title={open.name}
+              src={projectUrl(open.id)}
+              className="min-h-0 flex-1 rounded-xl border border-white/[0.12] bg-[#0a0d13]"
+            />
+          </div>,
+          document.body,
+        )}
+
+      {/* design-system inspector */}
+      {inspect &&
+        createPortal(
+          <div className="fixed inset-0 z-[96] bg-[#07090f]">
+            {/* Claude-Design-grade: a full-screen reading room, not a modal.
+                Left rail indexes the groups; the cards ARE the content. */}
+            <div className="flex h-full flex-col">
+              <div className="flex items-center gap-4 border-b border-white/[0.07] px-6 py-4">
+                <div className="min-w-0">
+                  <div className="text-[17px] font-semibold tracking-[-0.01em]">{inspect.name}</div>
+                  <div className="text-[10.5px] text-white/40">
+                    imported {inspect.addedAt} · {inspect.colors.length} tokens ·{" "}
+                    {inspect.components.length} components · {(inspect.cards ?? []).length} pages
+                  </div>
+                </div>
+                <span className="flex -space-x-1.5 pl-2">
+                  {colorfulFirst(inspect.colors.map((c) => c.value))
+                    .slice(0, 7)
+                    .map((v) => (
+                      <span
+                        key={v}
+                        className="h-4 w-4 rounded-full border-2 border-[#07090f]"
+                        style={{ background: v }}
+                      />
+                    ))}
+                </span>
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="hidden font-mono text-[10px] text-white/30 md:block">
+                    {inspect.fonts.join(" · ")}
+                  </span>
+                  <button
+                    onClick={() => setInspect(null)}
+                    className="rounded-lg border border-white/[0.12] p-2 text-white/50 hover:text-white"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex min-h-0 flex-1">
+                <nav className="hidden w-[210px] shrink-0 overflow-y-auto border-r border-white/[0.06] p-4 md:block">
+                  {Object.entries(
+                    (inspect.cards ?? []).reduce<Record<string, DesignSystemCard[]>>((acc, c) => {
+                      (acc[c.group] ??= []).push(c);
+                      return acc;
+                    }, {}),
+                  ).map(([group, cards]) => (
+                    <div key={group} className="mb-4">
+                      <button
+                        onClick={() =>
+                          document
+                            .getElementById(`ds-group-${group}`)
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                        }
+                        className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/60 hover:text-white"
+                      >
+                        {group}
+                      </button>
+                      {cards.map((c) => (
+                        <button
+                          key={c.file}
+                          onClick={() =>
+                            document
+                              .getElementById(`ds-card-${c.file}`)
+                              ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                          }
+                          className="block w-full truncate py-[3px] text-left text-[11.5px] text-white/40 transition-colors hover:text-white/85"
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </nav>
+                <div className="min-w-0 flex-1 overflow-y-auto px-6 py-6 md:px-10">
+                  {inspect.example && (
+                    <div className="mb-10">
+                      <div className="mb-1 text-[15px] font-semibold tracking-[-0.01em]">
+                        The system, live
+                      </div>
+                      <div className="mb-3 text-[11.5px] text-white/40">
+                        Its own example page, running in place
+                      </div>
+                      <div className="overflow-hidden rounded-2xl border border-white/[0.09]">
+                        <iframe
+                          title={`${inspect.name} example`}
+                          src={`/__design_system_asset/${encodeURIComponent(inspect.id)}/${encodeURIComponent(inspect.example)}`}
+                          className="h-[460px] w-full border-0 bg-[#0a0d13]"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {Object.entries(
+                    (inspect.cards ?? []).reduce<Record<string, DesignSystemCard[]>>((acc, c) => {
+                      (acc[c.group] ??= []).push(c);
+                      return acc;
+                    }, {}),
+                  ).map(([group, cards]) => (
+                    <div key={group} id={`ds-group-${group}`} className="mb-10 scroll-mt-4">
+                      <div className="mb-4 border-b border-white/[0.07] pb-2 text-[15px] font-semibold tracking-[-0.01em]">
+                        {group}
+                      </div>
+                      {cards.map((c) => (
+                        <div key={c.file} id={`ds-card-${c.file}`} className="mb-7 scroll-mt-4">
+                          <div className="mb-0.5 text-[13px] font-semibold text-white/85">
+                            {c.name}
+                          </div>
+                          {c.subtitle && (
+                            <div className="mb-2 text-[11px] text-white/40">{c.subtitle}</div>
+                          )}
+                          {!c.subtitle && <div className="mb-2" />}
+                          <InspectorCard systemId={inspect.id} card={c} />
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+// ── Studio shell ────────────────────────────────────────────────────────────
+
+const STUDIO_MODES = [
+  {
+    id: "build" as const,
+    label: "Design",
+    hint: "Build anything · any model",
+  },
+  {
+    id: "carousel" as const,
+    label: "Carousel",
+    hint: "Instagram · 4:5 · system-driven",
+  },
+  {
+    id: "lut" as const,
+    label: "Lut",
+    hint: "Color grades · .cube export",
+  },
+];
+
+// Author a system by hand — the counterpart to importing a zip. Paste hexes
+// however they arrive (a CSS block, a comma list, one per line); the parser
+// takes the colours and leaves the punctuation.
+function SystemComposer({
+  busy,
+  onClose,
+  onCreate,
+}: {
+  busy: boolean;
+  onClose: () => void;
+  onCreate: (p: {
+    name: string;
+    colors: { name: string; value: string }[];
+    fonts: string[];
+    notes: string;
+  }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [raw, setRaw] = useState("");
+  const [fonts, setFonts] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const colors = useMemo(() => {
+    const out: { name: string; value: string }[] = [];
+    const seen = new Set<string>();
+    const re = /(--[a-z0-9-]+)?\s*:?\s*(#[0-9a-fA-F]{6})\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw)) !== null) {
+      const value = m[2].toLowerCase();
+      if (seen.has(value)) continue;
+      seen.add(value);
+      out.push({ name: m[1] ?? `--c-${out.length + 1}`, value });
+    }
+    return out.slice(0, 24);
+  }, [raw]);
+
+  const fontList = useMemo(
+    () =>
+      fonts
+        .split(/[,\n]/)
+        .map((f) => f.trim())
+        .filter(Boolean)
+        .slice(0, 8),
+    [fonts],
+  );
+
+  const ready = name.trim().length > 0 && colors.length > 0;
+
+  return (
+    <div className="fixed inset-0 z-[98] grid place-items-center bg-black/78 p-6 backdrop-blur-md">
+      <div className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-white/[0.12] bg-[#0b0e15] shadow-[0_60px_160px_-40px_rgba(0,0,0,1)]">
+        {/* the live proof strip — what you typed, as a palette */}
+        <div className="relative h-[86px] overflow-hidden border-b border-white/[0.08]">
+          {colors.length ? (
+            <div className="flex h-full">
+              {colors.map((c) => (
+                <div key={c.value} className="flex-1" style={{ background: c.value }} />
+              ))}
+            </div>
+          ) : (
+            <div className="design-render-field absolute inset-0 opacity-45">
+              {RENDER_LOBES.slice(0, 3).map((lobe) => (
+                <div
+                  key={lobe.cls}
+                  className={`design-render-lobe ${lobe.cls} absolute rounded-full mix-blend-screen`}
+                  style={{
+                    left: lobe.left,
+                    top: "-70%",
+                    width: "55%",
+                    height: "220%",
+                    background: `radial-gradient(circle at 50% 50%, ${lobe.color} 0%, ${lobe.color}00 64%)`,
+                    filter: "blur(28px)",
+                    opacity: 0.55,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          <div
+            className="absolute inset-x-0 bottom-0 flex items-end justify-between px-5 pb-2.5 pt-8 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70"
+            style={{ background: "linear-gradient(to top, rgba(11,14,21,0.92), transparent)" }}
+          >
+            <span>{colors.length ? `${colors.length} colours` : "paste your palette"}</span>
+            <span>{fontList.length ? fontList.join(" · ") : ""}</span>
+          </div>
+        </div>
+
+        <div className="p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="text-[15px] font-semibold">Write a new system</div>
+            <button onClick={onClose} className="rounded-lg p-1.5 text-white/40 hover:text-white">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+            Name
+          </label>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your brand · dark product"
+            className="mb-4 w-full rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 text-[13.5px] text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+          />
+
+          <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+            Palette
+          </label>
+          <textarea
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            placeholder="--ember: #d97706;  --ink: #070810;  #f4f4f5 …"
+            className="mb-4 h-20 w-full resize-none rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+          />
+
+          <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+            Fonts
+          </label>
+          <input
+            value={fonts}
+            onChange={(e) => setFonts(e.target.value)}
+            placeholder="Inter, Newsreader, JetBrains Mono"
+            className="mb-4 w-full rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 text-[13.5px] text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+          />
+
+          <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+            House rules
+          </label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Borders, never shadows. One accent per screen. Sentence case everywhere…"
+            className="mb-5 h-20 w-full resize-none rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 text-[13px] leading-relaxed text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+          />
+
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-white/30">
+              Every build in this room will follow it.
+            </span>
+            <button
+              onClick={() =>
+                onCreate({ name: name.trim(), colors, fonts: fontList, notes: notes.trim() })
+              }
+              disabled={!ready || busy}
+              className="rounded-xl bg-white px-6 py-2.5 text-[13px] font-semibold text-black transition-transform hover:-translate-y-0.5 disabled:opacity-30"
+            >
+              {busy ? "Creating…" : "Create system"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InspectorCard({ systemId, card }: { systemId: string; card: DesignSystemCard }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(820);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((es) => es[0] && setW(es[0].contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const [vw, vh] = card.viewport.split("x").map((n) => parseInt(n, 10) || 700);
+  const scale = w / vw;
+  return (
+    <div ref={ref} className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a0d13]">
+      <div className="overflow-hidden" style={{ height: vh * scale }}>
+        <iframe
+          title={card.name}
+          src={`/__design_system_asset/${encodeURIComponent(systemId)}/${card.file
+            .split("/")
+            .map(encodeURIComponent)
+            .join("/")}`}
+          loading="lazy"
+          className="origin-top-left border-0"
+          style={{ width: vw, height: vh, transform: `scale(${scale})` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StudioTab({ active }: { active: boolean }) {
+  const [mode, setMode] = useState<"carousel" | "build" | "lut">("build");
+  const [copied, setCopied] = useState(false);
+  useStudioFonts(active);
+  return (
+    <div>
+      {/* One slim row: room tabs on the left, the wall-folder instruction on
+          the right — nothing else between the header and the room. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {STUDIO_MODES.filter((m) => !(STAGE_HIDE_CAROUSEL && m.id === "carousel")).map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setMode(m.id)}
+              className={cn(
+                "flex h-9 items-center gap-2 rounded-full border px-4 text-[12.5px] font-semibold transition-all",
+                mode === m.id
+                  ? "border-white/[0.25] bg-white/[0.08] text-white"
+                  : "border-white/[0.07] text-white/50 hover:border-white/[0.15] hover:text-white/80",
+              )}
+            >
+              {m.id === "carousel" ? (
+                <InstagramMark
+                  className={cn("h-4 w-4", mode === m.id ? "text-[#E4405F]" : "text-white/35")}
+                />
+              ) : m.id === "lut" ? (
+                <span
+                  className={cn(
+                    "h-4 w-4 rounded-full",
+                    mode === m.id ? "opacity-100" : "opacity-40",
+                  )}
+                  style={{
+                    background: "conic-gradient(#c96f4e,#e8d47f,#7fae6f,#5b7d9e,#c96f4e)",
+                  }}
+                />
+              ) : (
+                <Palette
+                  className={cn("h-4 w-4", mode === m.id ? "text-white/85" : "text-white/35")}
+                />
+              )}
+              {m.label}
+            </button>
+          ))}
+        </div>
+        {mode === "build" && (
+          <button
+            onClick={() => {
+              void navigator.clipboard.writeText(WALL_PROMPT);
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 2400);
+            }}
+            title="This wall is a folder — paste one instruction into any Claude session and whatever it builds lands here automatically."
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.02] px-4 text-[11.5px] font-medium text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-300" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+            {copied ? "Copied — paste it into any Claude session" : "Build here from anywhere"}
+          </button>
+        )}
+      </div>
+      <div className={mode === "carousel" ? "block" : "hidden"}>
+        <CarouselStudio />
+      </div>
+      <div className={mode === "build" ? "block" : "hidden"}>
+        <BuildStudio active={active && mode === "build"} />
+      </div>
+      <div className={mode === "lut" ? "block" : "hidden"}>
+        <LutStudio active={active && mode === "lut"} />
+      </div>
+    </div>
+  );
+}
+
+// ── Lut room — the Color Lab, embedded whole ───────────────────────────────
+// The lab is a static page under public/color-lab: 13 grades on a measured
+// correction pass, wipe slider, DNA sliders, .cube export. It ships as one
+// self-contained folder so it survives OS rebuilds untouched.
+function LutStudio({ active }: { active: boolean }) {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (active) setLoaded(true);
+  }, [active]);
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#100f0f]">
+      {loaded ? (
+        <iframe
+          title="Colourlab"
+          src="/color-lab/index.html"
+          allow="fullscreen"
+          allowFullScreen
+          className="h-[calc(100vh-220px)] min-h-[640px] w-full border-0"
+        />
+      ) : (
+        <div className="grid h-[640px] place-items-center text-[12px] text-white/40">
+          Opening the lab…
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── New carousel system — name it, describe it, show it what "good" is ─────
+// A system is a written document, but nobody starts from a blank page: the
+// reference images you drop here are recorded in it, so the deck it governs
+// always has something to be measured against.
+
+function CarouselSystemComposer({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (brief: {
+    name: string;
+    notes: string;
+    refs: { id: string; path: string }[];
+  }) => void | Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [notes, setNotes] = useState("");
+  const [refs, setRefs] = useState<{ id: string; path: string }[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const attach = async (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (!images.length) return;
+    setAttaching(true);
+    setErr(null);
+    try {
+      const encoded = await Promise.all(
+        images.map(
+          (file, index) =>
+            new Promise<{ name: string; type: string; dataUrl: string }>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () =>
+                resolve({
+                  name: file.name || `system-ref-${Date.now()}-${index}.png`,
+                  type: file.type,
+                  dataUrl: String(reader.result ?? ""),
+                });
+              reader.onerror = () => reject(new Error("could not read file"));
+              reader.readAsDataURL(file);
+            }),
+        ),
+      );
+      const r = await fetch("/__design_reference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Claude-OS-Token": await studioToken() },
+        body: JSON.stringify({ files: encoded }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "upload failed");
+      setRefs((prev) => [...prev, ...d.items]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/72 p-6 backdrop-blur-sm">
+      <div
+        className="w-full max-w-[560px] rounded-2xl border border-white/[0.1] bg-[#0b0e15] p-6 shadow-2xl"
+        onPaste={(e) => {
+          const files = Array.from(e.clipboardData?.files ?? []);
+          if (files.length) {
+            e.preventDefault();
+            void attach(files);
+          }
+        }}
+      >
+        <div className="mb-1 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <InstagramMark className="h-5 w-5 text-[#E4405F]" />
+            <div className="text-[15px] font-semibold">New carousel system</div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-white/40 hover:text-white">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-4 text-[11.5px] leading-relaxed text-white/38">
+          A system is the written rulebook a deck follows — canvas, colour, type, voice. Name it and
+          sketch the idea; you can write the full document straight after.
+        </p>
+
+        <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+          Name
+        </label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Client system · editorial mono"
+          className="mb-4 w-full rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 text-[13.5px] text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+        />
+
+        <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+          The idea
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="What should every deck in this system feel like? Photography or flat colour, loud or quiet, who it talks to…"
+          className="mb-4 h-24 w-full resize-none rounded-xl border border-white/[0.1] bg-white/[0.03] px-3.5 py-2.5 text-[13px] leading-relaxed text-white/90 placeholder:text-white/25 focus:border-white/[0.22] focus:outline-none"
+        />
+
+        <label className="mb-1.5 block text-[10.5px] font-semibold uppercase tracking-[0.14em] text-white/45">
+          Show it what good looks like
+        </label>
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => void attach(Array.from(e.target.files ?? []))}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={attaching}
+            className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11.5px] font-medium text-white/60 transition-colors hover:text-white/90"
+          >
+            <ImagePlus className="h-3.5 w-3.5" />
+            {attaching ? "Adding…" : "Add reference images"}
+          </button>
+          <span className="text-[10px] text-white/25">or ⌘V to paste them in</span>
+          {refs.map((r) => (
+            <div key={r.id} className="group/ref relative h-11 w-11">
+              <img
+                src={fileUrl(r.id)}
+                alt=""
+                className="h-full w-full rounded-md border border-white/[0.1] object-cover"
+              />
+              <button
+                onClick={() => setRefs((prev) => prev.filter((x) => x.id !== r.id))}
+                className="absolute -right-1.5 -top-1.5 hidden rounded-full bg-black p-0.5 text-white/70 group-hover/ref:block"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {err && <div className="mb-3 text-[11.5px] text-red-300/85">{err}</div>}
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-white/[0.1] px-4 py-2.5 text-[12.5px] font-medium text-white/60 hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void onCreate({ name: name.trim(), notes, refs })}
+            disabled={!name.trim()}
+            className="rounded-xl bg-white px-5 py-2.5 text-[13px] font-semibold text-black transition-opacity disabled:opacity-30"
+          >
+            Create system
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

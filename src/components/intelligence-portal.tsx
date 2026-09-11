@@ -622,7 +622,7 @@ export function IntelligencePortal({ state, events, demo = true, onVoiceRequest,
         voice.current.lvl = (voice.current.lvl || 0) * 0.82 + lvl * 0.18;
         micL = voice.current.lvl;
       }
-      // snappy + amplified — the Oracle orbs (Pulse/Plasma/Rider) react quickly as Jack talks
+      // snappy + amplified — the Oracle orbs (Pulse/Plasma/Rider) react quickly to speech
       const combined = Math.max(voice.current.smB, micL);
       const gated = Math.max(0, combined - 0.1) * 1.7;  // drop the ambient noise floor → ~0 at rest, dynamic on real speech (KR bar stops sitting fully-extended)
       voice.current.vlOut = (voice.current.vlOut || 0) * 0.55 + gated * 0.45;

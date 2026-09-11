@@ -1,0 +1,8 @@
+{
+  "name": "Your website",
+  "title": "Your website \u00b7 Website OS",
+  "typeSample": "Your real headline.",
+  "typography": "Describe the actual fonts and type scale from this homepage.",
+  "starterPrompt": "Use Website OS to edit this homepage. Inspect the current source, apply my changes and rebuild the preview.",
+  "assets": []
+}

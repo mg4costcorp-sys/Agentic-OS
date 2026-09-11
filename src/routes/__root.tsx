@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -129,13 +130,14 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const websiteWorkspace = useRouterState({ select: (state) => state.location.pathname === "/websites" });
 
   return (
     <QueryClientProvider client={queryClient}>
       <div className="flex min-h-screen w-full bg-background text-foreground">
         <AppSidebar />
         <div className="flex flex-1 min-w-0 flex-col">
-          <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/85 px-4 backdrop-blur-md md:px-6">
+          {!websiteWorkspace && <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/85 px-4 backdrop-blur-md md:px-6">
             <div className="flex items-center gap-2 text-sm min-w-0">
               <MobileNav />
               {/* On mobile the sidebar drawer already shows Operator/local
@@ -154,8 +156,8 @@ function RootComponent() {
               <OperatorJobs />
               <ThemeToggle />
             </div>
-          </header>
-          <main className="flex-1 overflow-x-hidden p-4 md:p-6">
+          </header>}
+          <main className={websiteWorkspace ? "flex-1 min-h-0" : "flex-1 overflow-x-hidden p-4 md:p-6"}>
             <Outlet />
           </main>
         </div>

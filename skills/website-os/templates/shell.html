@@ -1,0 +1,1779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yourbrand — design system</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Plus+Jakarta+Sans:ital,wght@0,500;0,600;0,700;0,800;1,500;1,600;1,700;1,800&display=swap" rel="stylesheet">
+<!-- The candidate display faces for the type set (graphics view). Two stylesheets, ~8KB combined —
+     the font FILES only download when the graphics tab is opened, because a browser never fetches
+     a face that is only referenced inside a `hidden` subtree. -->
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,400..800,0..100,0..1;1,9..144,400..800,0..100,0..1&family=Gabarito:wght@400..900&display=swap" rel="stylesheet">
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@1&f[]=ranade@1,2&f[]=chubbo@1,2&f[]=erode@1,2&f[]=zodiak@1,2&f[]=boska@1,2&f[]=gambarino@400&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   NEURO — premium paper-craft AI learning brand
+   the category leader's structural mechanics, our own palette + art system.
+   ============================================================ */
+:root{
+  /* ink + brand */
+  --ink:#1E2D4D; --ink-lip:#16223B; --ink-soft:#2B3D63;
+  --aizome:#3E62A8; --aizome-lip:#2F4E8A;
+  /* --slate is a BORDER/chrome value. Text uses --slate-text, which clears 4.5:1 on paper. */
+  --slate:#7C8FA8; --slate-soft:#A8B6C6; --slate-text:#586B84;
+  /* surfaces */
+  --paper:#F7F4ED; --card:#FFFDF8; --fold:#E4DED2; --fold-2:#EFEAE0;
+  --midnight:#141B33;
+  /* accents (semantic) */
+  --persimmon:#E2643C; --persimmon-lip:#C4502C;
+  --gold:#F2B01E;   /* review stars only — brighter than --ochre, which is the in-app reward hue */
+  --ochre:#C9A227; --ochre-lip:#A8871B;
+  --moss:#5C7A4A; --moss-lip:#4A6339;
+  --madder:#B33F3F; --madder-lip:#953232;
+
+  --display:'Bricolage Grotesque','Plus Jakarta Sans',sans-serif;
+  --sans:'Plus Jakarta Sans',system-ui,sans-serif;
+
+  --r:14px; --r-app:18px; --r-xs:6px; --lip:4px; --lip-t:.1s;
+  --paper-lip:#C9C3B6; --midnight-text:#9AA6C4; --sky-1:#E8EEF6; --sky-2:#DCE6F2;
+  --sel-fill:#EAF0FA; --sel-lip:#C3D3EC; --ok-fill:#EDF3E8; --ok-lip:#C4D6B8;
+  --no-fill:#FAECEC; --no-lip:#E8C4C4; --locked-lip:#CFC8BA;
+  --nav-h:72px; --strip-h:64px; --container:1080px;
+  --ease-soft:cubic-bezier(.22,1,.36,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font:600 17px/1.6 var(--sans);color:var(--ink-soft);background:var(--paper);-webkit-font-smoothing:antialiased}
+.wrap{width:100%;max-width:var(--container);margin:0 auto;padding:0 28px}
+img{max-width:100%;height:auto;display:block}
+
+/* ---------- type ---------- */
+/* line 1 carries the page; line 2 drops back to a subline, with only the promise emboldened */
+/* one voice, one size — the line carries itself without a second tier of type.
+   The italic is a real cut (the ital axis is loaded), never a synthesised slant. */
+h1.hero-h1{font:700 50px/1.16 var(--sans);color:var(--ink);letter-spacing:-.015em}
+/* the tail wraps as one unit so "to" never strands at the end of line one.
+   The subject is set letter-by-letter in a four-hue cycle — every one of these
+   clears 3:1 on paper, so the play never costs legibility. The h1 carries an
+   aria-label and the split letters are hidden, or a screen reader spells it out. */
+h1.hero-h1 .h1-tail{white-space:nowrap}
+h1.hero-h1 i{font-style:italic;font-synthesis:none}
+h1.hero-h1 i .c1{color:var(--aizome)}      /* blue  5.44:1 */
+h1.hero-h1 i .c2{color:var(--ochre-lip)}   /* gold  3.11:1 */
+h1.hero-h1 i .c3{color:var(--moss)}        /* green 4.41:1 */
+h1.hero-h1 i .c4{color:var(--madder)}      /* red   5.17:1 */
+.display{font-family:var(--display);font-weight:700;font-size:50px;line-height:1.1;letter-spacing:-.02em;color:var(--ink)}
+.display-xl{font-family:var(--display);font-weight:700;font-size:68px;line-height:1.05;letter-spacing:-.025em;color:var(--ink)}
+/* The eyebrow is a quiet label; the ACCENT lives on the heading, where it can actually be seen.
+   Persimmon at 50px clears 3:1 for large text — at 13px it never did. */
+.eyebrow{font:800 13px var(--sans);letter-spacing:1.6px;text-transform:uppercase;color:var(--slate-text)}
+.feature .copy .display{color:var(--persimmon)}
+.feature.flip .copy .display{color:var(--aizome)}
+.lede{font-size:18px;color:var(--slate-text);font-weight:600}
+.cite{font-size:14px;line-height:1.6;color:var(--slate-text);font-weight:600;padding-left:16px;border-left:3px solid var(--fold);margin-bottom:24px}
+.inline-link{color:var(--aizome);font-weight:800;text-decoration:none;border-bottom:2px solid rgba(62,98,168,.3);transition:border-color .2s}
+@media(hover:hover){.inline-link:hover{border-color:var(--aizome)}}
+
+/* ---------- buttons: the lip ---------- */
+.btn{position:relative;z-index:0;display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  height:54px;padding:0 22px;border:none;background:none;cursor:pointer;border-radius:var(--br,var(--r));
+  font:800 15px/1 var(--sans);letter-spacing:.6px;text-transform:uppercase;color:var(--paper);text-decoration:none;
+  transition:filter .2s,transform var(--lip-t)}
+.btn::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--bg,var(--ink));
+  border-radius:var(--br,var(--r));color:var(--lipc,var(--ink-lip));box-shadow:0 var(--lw,var(--lip)) 0;
+  transition:box-shadow var(--lip-t)}
+.btn:active{transform:translateY(var(--lw,var(--lip)))}
+.btn:active::before{box-shadow:none}
+/* Hover lifts the button and GROWS the lip — on a system whose whole identity is a 4px hard lip,
+   a brightness tweak that never touches the lip isn't a hover state. */
+@media(hover:hover){
+  .btn:hover{filter:brightness(1.06);transform:translateY(-2px)}
+  .btn:hover::before{box-shadow:0 calc(var(--lw,var(--lip)) + 2px) 0}
+  .btn-ghost:hover{filter:none}.btn-ghost:hover::before{background:var(--fold-2)}
+}
+/* Press is asymmetric on purpose: instant down, eased release. Symmetric felt soft, not clicky. */
+.btn:active,.btn:hover:active{transform:translateY(var(--lw,var(--lip)));transition-duration:0s;filter:none}
+.btn:active::before,.btn:hover:active::before{box-shadow:none;transition-duration:0s}
+.btn-sm{height:46px;padding:0 20px;font-size:14px}
+.btn-app{--br:var(--r-app)}
+.btn-accent{--bg:var(--persimmon);--lipc:var(--persimmon-lip)}
+.btn-ghost{--bg:var(--card);--lipc:var(--fold);--lw:2px;color:var(--ink)}
+.btn-ghost::before{border:2px solid var(--fold)}
+.btn-light{--bg:var(--paper);--lipc:var(--paper-lip);--lw:3px;color:var(--ink)}
+/* A disabled button reads as OFF, not as a faded accent. `opacity:.45` on persimmon put a dead
+   salmon rectangle on screen as the page's only accent button. */
+.btn.is-off{--bg:var(--fold);--lipc:var(--locked-lip);color:var(--slate-text);cursor:default;
+  transition:background-color .2s,color .2s}
+.btn.is-off:hover{filter:none;transform:none}
+.btn.is-off:hover::before{box-shadow:0 var(--lw,var(--lip)) 0}
+
+:focus-visible{outline:3px solid var(--aizome);outline-offset:3px;border-radius:var(--r-xs)}
+.btn:focus-visible,.node:focus-visible,.opt:focus-visible{outline-offset:5px}
+
+/* ---------- nav ---------- */
+.nav{position:sticky;top:0;z-index:100;height:var(--nav-h);background:rgba(247,244,237,.92);
+  backdrop-filter:blur(10px);border-bottom:2px solid var(--fold)}
+.nav .wrap{height:100%;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.logo img{width:42px;height:42px}
+.logo .word{font-family:var(--display);font-weight:800;font-size:32px;color:var(--ink);letter-spacing:-.02em}
+.nav-right{font:800 14px var(--sans);letter-spacing:.6px;text-transform:uppercase;color:var(--slate-text);cursor:pointer;background:none;border:none;padding:6px}
+/* The two right-hand states crossfade in place. `display` cannot be transitioned, so swapping it
+   teleported a button into existence at scrollY 300 — the cheapest moment on a 6,890px page. */
+.nav{transition:height .3s var(--ease-soft),background-color .3s,border-color .3s,box-shadow .3s}
+.nav-swap{position:relative;display:flex;align-items:center;justify-content:flex-end;min-width:150px;height:46px}
+.nav-swap>*{position:absolute;right:0;transition:opacity .28s var(--ease-soft),translate .28s var(--ease-soft),scale .28s var(--ease-soft)}
+.nav .btn-sm{opacity:0;translate:0 8px;scale:.94;pointer-events:none}
+.nav.scrolled .nav-right{opacity:0;translate:0 -8px;pointer-events:none}
+.nav.scrolled .btn-sm{opacity:1;translate:none;scale:none;pointer-events:auto}
+/* the bar itself acknowledges the scroll: it compresses and its edge firms up */
+.nav.scrolled{height:62px;border-color:var(--slate-soft)}
+.nav.scrolled .logo img{width:36px;height:36px}
+.nav.scrolled .logo .word{font-size:27px}
+.logo img,.logo .word{transition:width .3s var(--ease-soft),height .3s var(--ease-soft),font-size .3s var(--ease-soft)}
+
+/* ---------- motion primitives (bar.md: 2–4s, ease-in-out, pendulum) ---------- */
+/* Rotation peaks at 30/70%, lift peaks at 50% — real buoyancy lags rotation behind the rise.
+   Perfectly coupled Y+rotation is the tell that something is on a CSS loop. */
+@keyframes bob{0%,100%{transform:translateY(0) rotate(0deg)}30%{transform:translateY(-9px) rotate(-1.2deg)}
+  50%{transform:translateY(-14px) rotate(-.7deg)}70%{transform:translateY(-9px) rotate(.4deg)}}
+@keyframes bob-alt{0%,100%{transform:translateY(0) rotate(0deg)}30%{transform:translateY(-7px) rotate(.9deg)}
+  50%{transform:translateY(-11px) rotate(.5deg)}70%{transform:translateY(-7px) rotate(-.3deg)}}
+@keyframes drift{0%,100%{transform:translateY(0) translateX(0)}50%{transform:translateY(-12px) translateX(6px)}}
+@keyframes sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+@keyframes pulse-ring{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.12);opacity:.15}}
+.float{animation:none}
+/* was 2.6s at ±18px — the largest amplitude on the shortest period, ~2.5x the linear velocity
+   of everything else. Slowed and calmed so it sits in the same physical world. */
+.float-alt{animation:none}
+.float-drift{animation:none}
+/* a hanging certificate pivots from where it hangs, not from its middle */
+.float-sway{animation:none}
+/* stagger the phase so sections sharing a loop never beat in unison */
+.ph1{animation-delay:-.7s}.ph2{animation-delay:-1.4s}.ph3{animation-delay:-2.1s}.ph4{animation-delay:-2.8s}
+/* ---------- layered scenes: SCROLL-DRIVEN ----------
+   Nothing here animates on its own. Each illustration is split into its separate objects
+   (art/split_layers.py — alpha connected components, verified lossless: 0 pixels dropped),
+   and every object carries a radial vector away from the scene's centre of mass.
+   The page multiplies that vector by --a, how far the scene sits from the middle of the
+   viewport. At --a:0 the objects are back in their exact original positions, so a centred
+   scene IS the untouched artwork. Scroll stops, motion stops. */
+.scene{position:relative;width:100%;aspect-ratio:var(--ar);pointer-events:none;--a:0;--r:0}
+.scene .pc{position:absolute;left:var(--l);top:var(--t);width:var(--w);height:auto;
+  translate:calc(var(--ox) * var(--a)) calc(var(--oy) * var(--a));
+  rotate:calc(var(--rot) * var(--r));
+  will-change:translate,rotate}
+/* videos share the scroll clock — currentTime is scrubbed, never auto-played */
+.scene-v{position:relative;width:100%;line-height:0}
+/* a single character is ONE object — splitting it shed the hero screen's bars and the owl's eye.
+   Solos move as a whole on the same scroll clock. */
+.solo{display:block;margin:0 auto;translate:0 calc(var(--solo,26px) * var(--sa,0));
+  rotate:calc(1.2deg * var(--sr,0));will-change:translate,rotate}
+.scene-v video{width:100%;height:auto;display:block}
+/* the mascot is on screen for the whole 6,890px scroll — it was the one thing that never moved */
+@keyframes nod{0%,88%,100%{transform:translateY(0) rotate(0deg)}92%{transform:translateY(-3px) rotate(-4deg)}96%{transform:translateY(-1px) rotate(2deg)}}
+.logo img{animation:none}
+@media(hover:hover){.logo:hover img{animation-duration:1.4s}}
+
+/* scroll reveal — 600ms, resolves in one direction.
+   Uses the standalone `translate`/`scale` properties, never `transform`, so a reveal
+   can never overwrite a layout transform on the same element. */
+.rise{transition:opacity .6s var(--ease-soft),translate .6s var(--ease-soft),scale .6s var(--ease-soft),clip-path .7s var(--ease-soft)}
+.js .rise:not(.in){opacity:0;translate:0 26px}
+.rise.in{opacity:1;translate:none;scale:none}
+/* reveal variants — the verb matches what is arriving */
+.js .rise-l:not(.in){translate:-34px 0}          /* copy entering from its own side */
+.js .rise-r:not(.in){translate:34px 0}
+.js .rise-pop:not(.in){translate:0 18px;scale:.94}  /* illustrations arrive with weight */
+/* the mural grows up out of the bottom edge rather than floating in as a block */
+.js .rise-wipe:not(.in){translate:0 14px;clip-path:inset(64% 0 0 0)}
+.rise-wipe.in{clip-path:inset(0 0 0 0)}
+.rise.d1{transition-delay:.09s}.rise.d2{transition-delay:.18s}.rise.d3{transition-delay:.27s}
+.rise.d4{transition-delay:.36s}.rise.d5{transition-delay:.45s}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .float,.float-alt,.float-drift,.float-sway,.node.current .halo,.opt.ok,.opt.no,.scene .pc,.logo img,.stars svg{animation:none}
+  .js .rise,.js .rise:not(.in){opacity:1;translate:none;scale:none;clip-path:none;transition:none;transition-delay:0s}
+  .progress .fill,.sw,.badge,.lesson-toast{transition:none}
+  .btn,.btn::before,.opt,.opt::before,.node,.node::before,.inline-link,.strip a,.switcher button,.field{transition:none}
+}
+
+/* ---------- hero ---------- */
+.hero{min-height:calc(100vh - var(--nav-h) - var(--strip-h));display:flex;align-items:center;padding:40px 0}
+.hero .wrap{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center}
+.hero-art{position:relative;display:flex;justify-content:center}
+.hero-art .scene{max-width:600px;margin-right:-10px}
+.hero .wrap{grid-template-columns:1.05fr .95fr;gap:24px;max-width:1180px}
+.hero-copy{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:22px}
+.hero-copy h1{max-width:440px}
+.hero-cta{display:flex;flex-direction:column;gap:12px;width:320px}
+
+/* rating and marks share the CTA's 320px column and centre on it, so the whole
+   block under the buttons reads as one centred stack rather than a ragged left edge */
+.trust{display:flex;align-items:center;justify-content:center;gap:9px;width:320px}
+/* trusted-by row: aligned under the rating, greyscale so it never competes with the CTA */
+/* no label — the marks sit straight under the rating and carry themselves */
+.trust-co{display:flex;flex-direction:column;align-items:center;width:320px;margin-top:-8px}
+/* space-between pushes the marks out to the full column width instead of clustering them */
+.trust-co .row{display:flex;align-items:center;justify-content:space-between;width:100%;gap:0}
+/* the marks sit back until you reach for one: colour returns and it lifts.
+   Nothing dims — the neighbours hold their resting state rather than greying out. */
+.trust-co .row img{height:25px;width:auto;opacity:.62;filter:grayscale(1);
+  transition:opacity .22s var(--ease-soft),filter .22s var(--ease-soft),translate .22s var(--ease-soft)}
+@media(hover:hover){
+  .trust-co .row img:hover{opacity:1;filter:grayscale(0);translate:0 -3px}
+}
+@media(prefers-reduced-motion:reduce){.trust-co .row img{transition:none}}
+.trust-stars{display:inline-flex;gap:3px}
+.trust-stars svg{width:17px;height:17px;fill:var(--gold)}
+.trust b{font:800 15px var(--sans);color:var(--ink)}
+.trust-sub{font:600 14px var(--sans);color:var(--slate-text)}
+
+/* ---------- track strip ---------- */
+.strip{height:var(--strip-h);border-top:2px solid var(--fold);border-bottom:2px solid var(--fold);display:flex;align-items:center;background:var(--card)}
+.strip .wrap{display:flex;align-items:center;gap:8px}
+.strip-scroll{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;flex:1}
+.strip-scroll::-webkit-scrollbar{display:none}
+.strip a{display:inline-flex;align-items:center;gap:10px;flex:none;padding:9px 15px;border-radius:var(--r);
+  font:800 13.5px var(--sans);letter-spacing:.7px;text-transform:uppercase;color:var(--slate-text);text-decoration:none;
+  transition:background .2s,color .2s}
+@media(hover:hover){.strip a:hover{background:var(--fold-2);color:var(--ink)}}
+/* the fade is the only cue that the row continues past the chevron */
+.strip-scroll{mask-image:linear-gradient(90deg,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%)}
+
+.strip .chev{background:none;border:none;color:var(--slate-text);font-size:22px;cursor:pointer;padding:4px 8px;line-height:1;
+  border-radius:var(--r-xs);transition:background .2s,color .2s,transform .12s}
+.strip .chev:active{transform:scale(.86)}
+.strip .chev:disabled{opacity:.25;cursor:default;pointer-events:none}
+@media(hover:hover){.strip .chev:hover{background:var(--fold-2);color:var(--ink)}}
+.strip .tic{width:22px;height:22px;flex:none;display:block}
+@media(hover:hover){.strip a:hover .tic{transform:scale(1.12)}}
+.strip .tic{transition:transform .25s var(--ease-soft)}
+
+
+/* ---------- live lesson demo (real product surface, not an illustration) ---------- */
+.lesson{position:relative;z-index:0;width:100%;max-width:430px;background:var(--card);
+  border:2px solid var(--fold);border-radius:var(--r-app);padding:22px}
+.lesson::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:var(--r-app);
+  background:var(--card);color:var(--fold);box-shadow:0 4px 0}
+.lesson-top{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.lesson-top .progress{flex:1;height:14px;--track-h:14px}
+.lesson-hearts{display:inline-flex;align-items:center;gap:5px;font:800 14px var(--sans);color:var(--madder)}
+.lesson-hearts svg{width:17px;height:17px}
+.lesson-q{font:800 18px/1.4 var(--sans);color:var(--ink);margin-bottom:6px}
+.lesson-sub{font:600 13.5px var(--sans);color:var(--slate-text);margin-bottom:16px}
+.lesson .opt{font-size:14.5px;padding:12px 14px}
+.lesson .opt .key{width:26px;height:26px;font-size:12px}
+.lesson-foot{display:flex;align-items:center;gap:12px;margin-top:18px;min-height:50px}
+.lesson-foot .btn{height:46px;font-size:13.5px}
+.lesson-toast{display:flex;align-items:center;gap:8px;font:800 14px var(--sans);color:var(--moss-lip);
+  opacity:0;transform:translateY(6px);transition:opacity .4s var(--ease-soft),transform .4s var(--ease-soft)}
+.lesson-toast.show{opacity:1;transform:none}
+.lesson-toast.miss{color:var(--madder)}
+.lesson-chips{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.lesson-chips .chip{font-size:13.5px;padding:6px 11px}
+
+/* this band's heading is capped at two lines and its copy at a short measure — it was running
+   long enough to unbalance the pair. .sync-in drops the sibling stagger so both halves land together. */
+[data-sec="method"] .display{max-width:none;font-size:42px;line-height:1.12}
+[data-sec="method"] .lede{max-width:42ch}
+[data-sec="method"] .cite{max-width:44ch;font-size:13.5px}
+.sync-in .rise{transition-delay:0s !important}
+
+/* ---------- feature ---------- */
+/* 640px, not a viewport: the real the category leader bands measure 640 and fill ~56%.
+   At min(100vh,740px) ours resolved to a full 720 and sat 44% full — 405px of dead paper. */
+.feature{min-height:640px;display:flex;align-items:center;padding:56px 0}
+.feature .wrap{display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:center}
+.feature .copy{max-width:500px}
+/* a real tier: label hugs the heading, heading breathes into body, body pushes the CTA away */
+.feature .copy .eyebrow{margin-bottom:8px}
+.feature .copy .display{margin-bottom:24px}
+.feature .copy p{margin-bottom:32px}
+.feature .copy p:last-child{margin-bottom:0}
+.feature .art{display:flex;justify-content:center}
+.feature .art img{max-width:460px}
+.feature.flip .art{order:-1}
+/* two bands break the grid on purpose — art runs past the container and crops on the viewport edge,
+   so the page isn't five sealed boxes in a row */
+.feature.bleed-r .art{justify-content:flex-start;margin-right:min(-13vw,-120px)}
+.feature.bleed-r .art img{max-width:640px}
+.feature.bleed-l .art{justify-content:flex-end;margin-left:min(-13vw,-120px)}
+.feature.bleed-l .art img{max-width:640px}
+/* `clip`, not `hidden`: hidden turns body into a scroll container and kills the sticky nav */
+html,body{overflow-x:clip}
+
+/* ---------- sky band (showpiece) ---------- */
+/* content sits in the upper half; the showpiece owns the bottom edge and is cropped by it */
+.sky{position:relative;z-index:2;min-height:100vh;max-height:100vh;background:linear-gradient(180deg,var(--sky-1) 0%,var(--sky-2) 100%);
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:28px;
+  padding:max(7vh,56px) 28px 0;text-align:center}
+/* wavy band separations — colour boundaries flow into each other instead of cutting straight,
+   and the art is free to hang over them (the sky showpiece overlaps the midnight band below) */
+.wave{position:absolute;left:0;right:0;width:100%;height:clamp(44px,7vh,84px);display:block;pointer-events:none}
+.wave-top{top:-1px}
+.wave-bot{bottom:-1px}
+.sky .display-xl{color:var(--ink)}
+.badges{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:11px;padding:11px 18px;background:var(--card);
+  border:2px solid var(--fold);border-bottom-width:4px;border-radius:var(--r);color:var(--ink);text-decoration:none;text-align:left;transition:transform .3s var(--ease-soft)}
+@media(hover:hover){.badge:hover{transform:translateY(-3px)}}
+.badge small{display:block;font-size:11px;font-weight:700;color:var(--slate-text);line-height:1.1}
+.badge b{font-size:15px;font-weight:800;line-height:1.2}
+/* capped by WIDTH, not height, so the showpiece is actually the biggest thing on the page,
+   and pinned to the bottom edge so the crop is a decision rather than a 53px near-miss */
+.sky-art{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;pointer-events:none;line-height:0;z-index:1}
+.sky-art .scene{width:min(980px,74%);margin-bottom:min(-8vh,-56px)}
+.sky .display-xl,.sky .badges{position:relative;z-index:1}
+
+/* ---------- super band ---------- */
+.super{min-height:100vh;max-height:100vh;background:var(--midnight);display:flex;align-items:center;padding:90px 0;position:relative;overflow:hidden}
+.super::before{content:"";position:absolute;width:760px;height:760px;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(201,162,39,.16),transparent 70%);left:6%;top:50%;transform:translateY(-50%)}
+.super .wrap{max-width:980px;display:grid;grid-template-columns:.9fr 1.1fr;gap:48px;align-items:center;position:relative}
+.super-art .solo{max-width:330px}
+.super-copy{text-align:left}
+.super-eyebrow{font:800 14px var(--sans);letter-spacing:3px;text-transform:uppercase;color:var(--ochre);margin-bottom:14px}
+.super-word{font-family:var(--display);font-weight:800;font-size:62px;line-height:1;letter-spacing:-.02em;color:var(--paper);margin-bottom:18px}
+.super p{color:var(--midnight-text);margin-bottom:30px}
+
+/* ---------- final ---------- */
+.final{position:relative;min-height:100vh;max-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:flex-start;gap:22px;text-align:center;overflow:hidden;
+  /* the sticky nav is 72px and floats over this band — clear it, or the heading
+     tucks under the bar as soon as the section reaches the top of the viewport */
+  padding:calc(var(--nav-h) + max(3vh,24px)) 28px 0}
+.final .display{font-size:58px}
+/* the mural bleeds off the bottom edge — cropped by the band, never a floating card.
+   Centred with auto margins, NOT translateX: .rise.in sets transform:none and would delete it. */
+/* the finale parade rises from BEHIND the ink wave: the artwork is composed with the cast cut
+   at the waist along its bottom edge, and the curve (z above) hides that edge at every x.
+   Scroll travel only ever sinks the bottom pieces (their spread vector points down), so the
+   cut can never surface. */
+.final-mural{position:absolute;left:0;right:0;bottom:0;margin-inline:auto;width:min(900px,72%);
+  pointer-events:none;line-height:0;z-index:2}
+.final-mural .scene{width:100%;margin-bottom:0}
+.final .display,.final>.btn,.final>.lede,.stars{position:relative;z-index:3}
+/* The reward motif, not a review score — ochre is the system's rewards-only hue, and the
+   caption names it as the in-product perfect-lesson star set. No rating is claimed. */
+.stars{display:flex;align-items:center;justify-content:center;gap:6px}
+.stars svg{width:26px;height:26px;fill:var(--gold)}
+.stars svg:nth-child(2){animation-delay:.12s}.stars svg:nth-child(3){animation-delay:.24s}
+.stars svg:nth-child(4){animation-delay:.36s}.stars svg:nth-child(5){animation-delay:.48s}
+.stars b{margin-left:12px;font:800 13px var(--sans);letter-spacing:.4px;color:var(--ink-soft);text-transform:none}
+@keyframes star-pop{0%,72%,100%{transform:scale(1) rotate(0)}80%{transform:scale(1.22) rotate(-7deg)}88%{transform:scale(.97) rotate(3deg)}}
+/* the closing band flows into the footer instead of butting against it */
+/* the wave sits BEHIND the parade now — the cast hangs over the ink rather than being
+   sliced by it. The art's own hard bottom edge lands on the section boundary, where the
+   navy footer takes over in the same ink, so the cut never shows. */
+.final-curve{position:absolute;left:0;right:0;bottom:-1px;width:100%;height:clamp(80px,13vh,160px);display:block;z-index:1}
+
+/* ---------- footer ---------- */
+.footer{background:var(--ink);color:var(--paper);padding:72px 0 44px}
+.footer .cols{display:grid;grid-template-columns:repeat(5,1fr);gap:24px;max-width:var(--container);margin:0 auto;padding:0 28px 40px}
+.footer h5{font:800 16px var(--sans);margin-bottom:16px}
+.footer a{display:block;font:600 15px/2.1 var(--sans);color:rgba(247,244,237,.72);text-decoration:none}
+@media(hover:hover){.footer a:hover{color:var(--paper)}}
+.footer .lang-row{border-top:2px solid rgba(247,244,237,.18);max-width:var(--container);margin:0 auto;padding:28px 28px 0}
+.footer .lang-row .t{font:800 15px var(--sans);margin-bottom:12px}
+.footer .lang-row a{display:inline-block;margin-right:18px}
+/* the page used to end on a row of course links — it now signs off */
+.foot-close{display:flex;align-items:center;gap:18px;flex-wrap:wrap;max-width:var(--container);
+  margin:0 auto;padding:34px 28px 0;margin-top:28px;border-top:2px solid rgba(247,244,237,.18)}
+.foot-close .logo{color:var(--paper)}
+.foot-close .logo img{width:34px;height:34px}
+.foot-close .logo .word{font-size:26px;color:var(--paper)}
+.foot-close>span{font:600 14px var(--sans);color:rgba(247,244,237,.6)}
+@media(hover:hover){.footer a:hover{color:var(--paper);translate:2px 0}}
+.footer a{transition:color .2s,translate .2s var(--ease-soft)}
+
+/* ---------- view switcher ---------- */
+/* the dock is the shell; the toggle on its right collapses the tabs away so the
+   switcher never sits on top of the design it is there to show off */
+.dock{position:fixed;bottom:24px;right:24px;z-index:500;display:flex;align-items:center;gap:4px;
+  background:var(--card);border:2px solid var(--fold);border-bottom-width:4px;border-radius:var(--r-app);padding:4px}
+.switcher{display:flex;gap:4px;overflow:hidden;max-width:520px;
+  transition:max-width .34s var(--ease-soft),opacity .22s ease}
+.dock.shut .switcher{max-width:0;opacity:0;pointer-events:none}
+.switcher button{border:none;background:none;cursor:pointer;padding:10px 16px;border-radius:var(--r);white-space:nowrap;
+  font:800 12.5px var(--sans);letter-spacing:.6px;text-transform:uppercase;color:var(--slate-text);transition:background .15s,color .15s}
+.switcher button.on{background:var(--ink);color:var(--paper)}
+@media(hover:hover){.switcher button:not(.on):hover{background:var(--fold-2);color:var(--ink)}}
+.dock-toggle{flex:none;border:none;background:none;cursor:pointer;width:34px;height:34px;padding:0;
+  border-radius:var(--r);color:var(--slate-text);display:grid;place-items:center;transition:background .15s,color .15s}
+.dock-toggle svg{width:18px;height:18px;transition:rotate .34s var(--ease-soft)}
+.dock.shut .dock-toggle svg{rotate:180deg}
+@media(hover:hover){.dock-toggle:hover{background:var(--fold-2);color:var(--ink)}}
+@media(prefers-reduced-motion:reduce){.switcher,.dock-toggle svg{transition:none}}
+[hidden]{display:none!important}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- DS + graphics views ---------- */
+.ds-hero{text-align:center;padding:90px 28px 46px}
+.ds-hero .display{font-size:50px}
+.ds-hero p{margin-top:12px}
+.ds-section{padding:0 0 90px}
+.ds-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px;max-width:var(--container);margin:0 auto;padding:0 28px}
+.panel{border:2px solid var(--fold);border-radius:var(--r);padding:28px;background:var(--card)}
+.panel.full{grid-column:1/-1}
+.panel h4{font:800 12.5px var(--sans);letter-spacing:1.2px;text-transform:uppercase;color:var(--slate-text);margin-bottom:22px}
+.note{font:600 13.5px/1.6 var(--sans);color:var(--slate-text)}
+.note code{background:var(--fold-2);border-radius:var(--r-xs);padding:1px 6px;font-size:12.5px;color:var(--ink)}
+.type-rows{border-top:2px solid var(--fold)}
+.type-row{display:grid;grid-template-columns:210px 1fr;gap:20px;padding:20px 0;border-bottom:2px solid var(--fold);align-items:baseline}
+.type-row .spec{font:700 13px/1.6 var(--sans);color:var(--slate-text)}
+.type-row .spec b{display:block;color:var(--ink)}
+.btn-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.sw{border:2px solid var(--fold);border-radius:var(--r);overflow:hidden;cursor:pointer;background:var(--card);display:block;width:100%;text-align:left;font:inherit;padding:0;
+  transition:border-color .3s,transform .4s var(--ease-soft)}
+@media(hover:hover){.sw:hover{border-color:var(--ink);transform:translateY(-3px)}}
+/* Grid items stretch to the tallest card, so a one-line caption used to leave dead space and the
+   colour blocks stopped at different heights. Flex the block instead: it absorbs the slack, every
+   swatch fills its card edge to edge, and every caption lands on the same baseline. */
+.sw{display:flex;flex-direction:column}
+.sw i{display:block;flex:1;min-height:64px}
+.sw span{display:block;padding:9px 11px;font:700 11.5px/1.4 var(--sans);color:var(--slate-text)}
+.sw span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw span b{display:block;font-weight:800;font-size:12.5px;color:var(--ink);letter-spacing:.2px}
+.sw span u{display:block;text-decoration:none;font-size:11px;color:var(--slate);letter-spacing:.3px}
+.rules{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.rule{border-radius:var(--r);padding:22px}
+.rule.do{border:2px solid var(--moss)}.rule.dont{border:2px solid var(--madder)}
+.rule h5{font:800 12.5px var(--sans);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:14px}
+.rule.do h5{color:var(--moss)}.rule.dont h5{color:var(--madder)}
+.rule ul{list-style:none}
+.rule li{position:relative;padding-left:24px;margin-bottom:11px;font:600 14px/1.5 var(--sans);color:var(--ink-soft)}
+.rule li::before{position:absolute;left:0;font-weight:900}
+.rule.do li::before{content:"✓";color:var(--moss)}
+.rule.dont li::before{content:"✕";color:var(--madder)}
+
+/* ---------- copy view ---------- */
+.proof{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.proof-card{position:relative;border:2px solid var(--fold);border-radius:var(--r);padding:22px 20px;background:var(--paper);
+  transition:translate .18s var(--ease-soft),box-shadow .18s var(--ease-soft)}
+.proof-card:hover{translate:0 -3px;box-shadow:0 6px 0 var(--fold)}
+.proof-card.win{border-color:var(--moss)}
+.proof-card>b{display:flex;align-items:center;gap:7px;margin-top:15px;font:800 19px/1.15 var(--sans);color:var(--ink)}
+.proof-card.win>b{color:var(--moss)}
+.proof-card>span{display:block;margin-top:7px;font:600 12.5px/1.5 var(--sans);color:var(--slate-text)}
+.pmk{display:grid;place-items:center;width:44px;height:44px}
+.pmk img,.pmk svg{width:44px;height:44px;border-radius:11px;display:block}
+.pmk.ink{color:var(--ink)}.pmk.ink svg{border-radius:0;width:38px;height:38px}
+.pmk.stack{display:flex;width:auto;align-items:center}
+.pmk.stack img{width:36px;height:36px;border-radius:10px;border:2.5px solid var(--paper);margin-right:-13px}
+.pmk.stack img:last-child{margin-right:0}
+.pmk.lint{width:auto;justify-content:start}
+.pmk.lint s{font:800 17px var(--sans);color:var(--madder);background:var(--card);border:2px solid var(--fold);
+  border-radius:9px;padding:7px 12px;text-decoration-thickness:2.5px}
+.pmk.score{border-radius:11px;background:var(--moss);color:var(--paper);font:800 19px var(--sans)}
+.pmk.score i{font-style:normal;font-size:11px;opacity:.75;margin-top:5px}
+.pf-star{width:19px;height:19px;flex:none;animation:star-pop 3.4s ease-in-out infinite}
+.meter{margin-top:13px}
+.mrow{display:flex;align-items:center;gap:9px;margin-top:7px}
+.mrow em{flex:none;width:42px;font:800 9.5px var(--sans);letter-spacing:1px;text-transform:uppercase;font-style:normal;color:var(--slate-soft)}
+.mtrack{flex:1;height:9px;border-radius:99px;background:var(--fold-2);overflow:hidden;display:block}
+.mfill{display:block;height:100%;border-radius:99px;background:var(--madder);width:var(--w);transition:width 1s var(--ease-soft) .4s}
+.mfill.good{background:var(--moss)}
+.js .rise:not(.in) .mfill{width:0}
+.pr-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.pr{border:2px solid var(--fold);border-radius:var(--r);padding:20px 16px 18px;background:var(--paper);text-align:center;
+  transition:translate .18s var(--ease-soft),box-shadow .18s var(--ease-soft)}
+.pr:hover{translate:0 -3px;box-shadow:0 6px 0 var(--fold)}
+.pr-art{height:66px;display:grid;place-items:center;margin-bottom:14px}
+.pr-art svg{width:76px;height:60px}
+.pr b{display:block;font:700 15px/1.3 var(--sans);color:var(--ink)}
+.pr span{display:block;margin-top:6px;font:700 10px var(--sans);letter-spacing:.8px;text-transform:uppercase;color:var(--slate-soft)}
+.panel h4 em{float:right;font-style:normal;color:var(--slate-soft)}
+.sw-groups{columns:2;column-gap:16px}
+.sg{break-inside:avoid;border:2px solid var(--fold);border-radius:var(--r);padding:20px;background:var(--paper);margin-bottom:16px}
+.sg-head{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+.sg-ic{flex:none;width:33px;height:33px;border-radius:10px;display:grid;place-items:center;background:var(--c);color:var(--paper)}
+.sg-ic svg{width:18px;height:18px}
+.sg-head b{font:800 12px var(--sans);letter-spacing:1.2px;text-transform:uppercase;color:var(--ink)}
+.sg-head em{margin-left:auto;font:800 10px var(--sans);letter-spacing:.8px;text-transform:uppercase;font-style:normal;color:var(--slate-soft)}
+.cw{background:var(--card);border:2px solid var(--fold-2);border-radius:14px;padding:14px 16px;margin-top:10px}
+.cw s{display:block;font:600 12.5px/1.5 var(--sans);color:var(--slate-soft);text-decoration-thickness:1px}
+.cw .cw-new{display:inline-block;font:800 9.5px var(--sans);letter-spacing:1px;text-transform:uppercase;font-style:normal;
+  color:var(--moss);border:1.5px solid var(--moss);border-radius:99px;padding:2px 9px}
+.cw p{position:relative;padding-left:23px;margin-top:6px;font:700 15px/1.45 var(--sans);color:var(--ink)}
+.cw p::before{content:"\2192";position:absolute;left:0;top:0;color:var(--persimmon);font-weight:800}
+.rhythm{display:flex;gap:10px}
+.rhythm .screen{flex:1;border:2px solid var(--fold);border-radius:var(--r);aspect-ratio:3/4;display:grid;place-items:center;
+  text-align:center;padding:12px;font:800 10.5px var(--sans);letter-spacing:.5px;text-transform:uppercase;color:var(--slate-text)}
+.rhythm .screen b{display:block;color:var(--ink);font-size:13px;margin-bottom:5px}
+/* login */
+.login-card{display:flex;flex-direction:column;gap:12px}
+.login-title{font-family:var(--display);font-weight:700;font-size:32px;color:var(--ink);text-align:center;margin-bottom:6px}
+.field{display:flex;align-items:center;background:var(--paper);border:2px solid var(--fold);border-radius:var(--r);height:52px;transition:border-color .15s}
+.field:focus-within{border-color:var(--aizome)}
+.field input{flex:1;border:none;background:none;outline:none;font:600 17px var(--sans);color:var(--ink);padding:8px 16px;caret-color:var(--aizome)}
+.field input::placeholder{color:var(--slate-soft)}
+.field .aux{font:800 12px var(--sans);letter-spacing:.7px;text-transform:uppercase;color:var(--slate-soft);padding-right:16px;text-decoration:none}
+.or{display:flex;align-items:center;gap:12px;color:var(--slate-soft);font:800 12px var(--sans);letter-spacing:.7px;margin:6px 0}
+.or::before,.or::after{content:"";flex:1;height:2px;background:var(--fold)}
+/* path */
+.path{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.node{position:relative;width:66px;height:66px;border:none;background:none;cursor:pointer;z-index:0;transition:filter .2s,transform var(--lip-t)}
+.node::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:50%;background:var(--nbg,var(--aizome));
+  color:var(--nlip,var(--aizome-lip));box-shadow:0 6px 0;transition:box-shadow var(--lip-t)}
+.node:active{transform:translateY(6px)}.node:active::before{box-shadow:none}
+@media(hover:hover){.node:hover{filter:brightness(1.06)}}
+.node svg{width:30px;height:30px;position:relative;top:-2px}
+.node.done{--nbg:var(--ochre);--nlip:var(--ochre-lip)}
+.node.locked{--nbg:var(--fold);--nlip:var(--locked-lip);pointer-events:none}
+.node.current .halo{position:absolute;inset:-9px;border-radius:50%;border:3px solid rgba(62,98,168,.35);animation:pulse-ring 2s ease-in-out infinite}
+.connector{width:28px;height:5px;border-radius:var(--r-xs);background:var(--fold)}
+.connector.done{background:var(--ochre)}
+/* quiz */
+.quiz{display:flex;flex-direction:column;gap:10px}
+.qq{font:800 19px var(--sans);color:var(--ink);margin-bottom:8px}
+.opt{position:relative;z-index:0;display:flex;align-items:center;gap:14px;padding:13px 16px;border:none;background:none;
+  text-align:left;cursor:pointer;border-radius:var(--r);font:700 16px var(--sans);color:var(--ink-soft);transition:transform var(--lip-t),color .15s}
+.opt::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--card);border:2px solid var(--fold);
+  border-radius:var(--r);color:var(--fold);box-shadow:0 2px 0;transition:box-shadow var(--lip-t),border-color .15s,background-color .15s}
+.opt:active{transform:translateY(2px)}.opt:active::before{box-shadow:none}
+@media(hover:hover){.opt:hover::before{background:var(--fold-2)}}
+.opt .key{display:grid;place-items:center;width:28px;height:28px;flex:none;border:2px solid var(--fold);border-radius:var(--r-xs);font:800 13px var(--sans);color:var(--slate-text)}
+.opt.sel{color:var(--aizome)}.opt.sel::before{border-color:var(--aizome);background:var(--sel-fill);color:var(--sel-lip)}
+.opt.ok{color:var(--moss-lip);animation:pop .4s ease-in-out}.opt.ok::before{border-color:var(--moss);background:var(--ok-fill);color:var(--ok-lip)}
+.opt.no{color:var(--madder);animation:shake .4s ease-in-out}.opt.no::before{border-color:var(--madder);background:var(--no-fill);color:var(--no-lip)}
+/* was scale(1.03) — 3% on a 340px row is invisible. Overshoot then settle. */
+@keyframes pop{30%{transform:scale(1.045)}55%{transform:scale(.995)}100%{transform:scale(1)}}
+/* was two keyframes on ease-in-out, which is a sway, not a rejection. Four oscillations, near-linear. */
+@keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-8px)}35%{transform:translateX(7px)}
+  55%{transform:translateX(-5px)}75%{transform:translateX(3px)}}
+.opt.no{animation:shake .32s cubic-bezier(.36,.07,.19,.97) both}
+/* the two numbers that carry the whole reward were the only things changing as bare text swaps */
+@keyframes tick{0%{transform:translateY(0);opacity:1}40%{transform:translateY(-9px);opacity:0}
+  41%{transform:translateY(7px)}100%{transform:translateY(0);opacity:1}}
+@keyframes heart-break{0%,100%{transform:scale(1) rotate(0)}25%{transform:scale(1.35) rotate(-9deg)}
+  50%{transform:scale(.82) rotate(6deg)}75%{transform:scale(1.08) rotate(-3deg)}}
+.lesson-chips .chip.bump{animation:tick .5s var(--ease-soft)}
+.lesson-hearts.lost svg{animation:heart-break .5s ease-in-out}
+.lesson-hearts.lost{animation:tick .5s var(--ease-soft)}
+/* the card is presented as the live product — it should respond to being touched */
+.lesson{transition:border-color .3s,translate .3s var(--ease-soft)}
+.lesson:focus-within{border-color:var(--aizome)}
+@media(hover:hover){.lesson:hover{translate:0 -3px}}
+/* progress */
+.progress{height:16px;background:var(--fold);border-radius:calc(var(--track-h,16px) + 8px);overflow:hidden}
+.progress .fill{position:relative;height:100%;width:0;background:var(--moss);border-radius:inherit;transition:width .8s var(--ease-soft)}
+.progress .fill::after{content:"";position:absolute;top:4px;left:8px;right:8px;height:4px;border-radius:var(--r-xs);background:rgba(255,255,255,.3)}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border:2px solid var(--fold);border-radius:var(--r);font:800 15px var(--sans);background:var(--card)}
+.chip svg{width:19px;height:19px}
+/* graphics view */
+.art-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+.art-card{border:2px solid var(--fold);border-radius:var(--r);background:var(--paper);padding:16px;text-align:center}
+.art-card img{margin:0 auto;max-height:190px;width:auto}
+.art-card b{display:block;margin-top:12px;font:800 12px var(--sans);letter-spacing:.7px;text-transform:uppercase;color:var(--ink)}
+.art-card span{display:block;font:600 12px var(--sans);color:var(--slate-text);margin-top:3px}
+.motion-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px}
+.motion-demo{border:2px solid var(--fold);border-radius:var(--r);padding:22px;text-align:center;background:var(--paper)}
+.motion-demo .box{width:56px;height:56px;border-radius:var(--r);background:var(--aizome);margin:0 auto 14px}
+.motion-demo b{display:block;font:800 12px var(--sans);letter-spacing:.6px;text-transform:uppercase;color:var(--ink)}
+.motion-demo span{font:600 12px var(--sans);color:var(--slate-text)}
+
+/* the type set — ten specimens, each one live and selectable.
+   --f/--w/--wb/--vf are set per card, so every line below renders in that card's own face. */
+.type-set{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px}
+.spec-card{position:relative;border:2px solid var(--fold);border-radius:var(--r);background:var(--paper);
+  padding:22px 22px 20px;transition:border-color .25s,translate .25s var(--ease-soft),box-shadow .25s;
+  font-family:var(--f);font-variation-settings:var(--vf,normal);color:var(--ink)}
+@media(hover:hover){.spec-card:hover{translate:0 -3px;border-color:var(--slate-soft)}}
+.spec-card.on{border-color:var(--aizome);box-shadow:0 0 0 4px var(--sel-fill)}
+.spec-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px;
+  font-family:var(--sans);font-weight:800;font-size:11.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--slate-text)}
+.spec-head .n{color:var(--persimmon)}
+/* the specimen block itself — sizes descend so you can read the face at four different scales */
+.spec-aa{display:flex;align-items:baseline;gap:18px;line-height:.95;margin-bottom:6px}
+.spec-aa .tell{font-size:30px;font-weight:var(--w);color:var(--slate);letter-spacing:.04em}
+
+/* THE STACK — one word, one size, one left edge, ten faces. Everything that isn't the letterforms
+   is set small and grey, because the moment two specimens sit in boxes with five lines of text each,
+   the eye reads "ten grey cards" and stops. Scanning a single column is what makes the shapes read. */
+.type-stack{list-style:none;border-top:2px solid var(--fold);margin-bottom:22px}
+.stack-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:20px;
+  padding:6px 14px;border-bottom:2px solid var(--fold);cursor:pointer;position:relative;
+  transition:background-color .2s,padding-left .25s var(--ease-soft)}
+.stack-row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:transparent;transition:background-color .2s}
+@media(hover:hover){.stack-row:hover{background:var(--fold-2);padding-left:22px}}
+.stack-row.on{background:var(--sel-fill)}
+.stack-row.on::before{background:var(--aizome)}
+.stack-word{font-family:var(--f);font-variation-settings:var(--vf,normal);font-weight:var(--w);
+  font-size:68px;line-height:1.2;color:var(--ink);white-space:nowrap}
+.stack-meta{display:flex;align-items:center;gap:14px;text-align:right}
+.stack-meta .nm{font:800 12px var(--sans);letter-spacing:1px;text-transform:uppercase;color:var(--ink)}
+.stack-meta .cls{font:600 11.5px var(--sans);color:var(--slate-text);min-width:112px;text-align:right}
+.stack-meta .ix{font:800 12.5px var(--sans);color:var(--slate-text);min-width:30px;text-align:right}
+.stack-meta .it{font:800 10px var(--sans);letter-spacing:.6px;text-transform:uppercase;
+  padding:3px 7px;border-radius:var(--r-xs);background:var(--fold-2);color:var(--slate-text)}
+.stack-row.on .stack-meta .nm{color:var(--aizome)}
+.rec{font:800 9.5px var(--sans);letter-spacing:.8px;text-transform:uppercase;padding:3px 8px;
+  border-radius:var(--r-xs);background:var(--persimmon);color:var(--paper);white-space:nowrap;
+  border:none;cursor:pointer;display:inline-flex;align-items:center;gap:5px;
+  transition:filter .2s,translate .2s var(--ease-soft)}
+@media(hover:hover){.rec:hover{filter:brightness(1.08);translate:0 -1px}}
+.rec .cx{display:inline-block;transition:rotate .25s var(--ease-soft);font-size:11px;line-height:1}
+.rec[aria-expanded="true"] .cx{rotate:45deg}
+
+/* The ampersand is the glyph designers actually judge a face by — it is where a typeface stops
+   solving a problem and starts having an opinion. Ten of them down the left edge, each set in its
+   own face, is the most information per pixel available on this whole panel. */
+.stack-amp{display:grid;place-items:center;width:52px;height:52px;flex:none;
+  border:2px solid var(--fold);border-radius:12px;background:var(--card);
+  font-family:var(--f);font-variation-settings:var(--vf,normal);font-weight:var(--w);
+  font-size:30px;line-height:1;color:var(--aizome);transition:border-color .2s,background-color .2s,color .2s}
+.stack-lead{display:flex;align-items:center;gap:18px;min-width:0}
+.stack-row.on .stack-amp{border-color:var(--aizome);background:var(--card);color:var(--persimmon)}
+.type-stack.rev .stack-amp{border-color:#2c3757;background:rgba(255,255,255,.05);color:var(--sky-2)}
+.type-stack.rev .stack-row.on .stack-amp{border-color:var(--sky-2);color:var(--persimmon)}
+
+/* the why-drawer opened by the Recommended chip */
+.why-row{padding:0 14px 20px;border-bottom:2px solid var(--fold)}
+.why-row .in{border-left:4px solid var(--persimmon);border-radius:var(--r-xs);
+  background:var(--fold-2);padding:16px 18px}
+.why-row h6{font:800 11px var(--sans);letter-spacing:1.1px;text-transform:uppercase;color:var(--persimmon);margin-bottom:10px}
+.why-row p{font:600 13.5px/1.65 var(--sans);color:var(--slate-text)}
+.why-row p+p{margin-top:8px}
+.why-row b{color:var(--ink);font-weight:800}
+.type-stack.rev .why-row{border-bottom-color:#26304f}
+.type-stack.rev .why-row .in{background:rgba(255,255,255,.05)}
+.type-stack.rev .why-row p{color:var(--midnight-text)}
+.type-stack.rev .why-row b{color:var(--paper)}
+@media(max-width:820px){.stack-meta .cls,.stack-meta .it{display:none}.stack-word{font-size:44px}}
+
+/* Reverse-out test. This is the check that actually separates display faces in practice and it is
+   not decoration here: Yourbrand has a real midnight band, and a face that holds together on warm paper
+   can go thin and rattly knocked out of the dark. Three colour dots per row would have looked nice
+   and told you nothing — they would be identical on all ten. */
+.type-stack.rev{background:var(--midnight);border-top-color:#26304f;border-radius:var(--r);padding:4px 0}
+.type-stack.rev .stack-row{border-bottom-color:#26304f}
+.type-stack.rev .stack-word{color:var(--paper)}
+.type-stack.rev .stack-meta .nm{color:var(--sky-2)}
+.type-stack.rev .stack-meta .cls,.type-stack.rev .stack-meta .ix{color:var(--midnight-text)}
+.type-stack.rev .stack-meta .it{background:rgba(255,255,255,.09);color:var(--midnight-text)}
+.type-stack.rev .stack-row.on{background:rgba(255,255,255,.07)}
+@media(hover:hover){.type-stack.rev .stack-row:hover{background:rgba(255,255,255,.05)}}
+
+.pick-note{border:2px solid var(--fold);border-left:4px solid var(--persimmon);border-radius:var(--r);
+  background:var(--card);padding:20px 22px;margin-bottom:22px}
+.pick-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.pick-head b{font-family:var(--display);font-weight:800;font-size:26px;color:var(--ink);letter-spacing:-.01em}
+.pick-note p{font:600 13.5px/1.65 var(--sans);color:var(--slate-text)}
+.pick-note p+p{margin-top:10px}
+.pick-note b{color:var(--ink);font-weight:800}
+.pick-note code{background:var(--fold-2);border-radius:var(--r-xs);padding:1px 6px;font-size:12.5px;color:var(--ink)}
+
+/* the ten full specimens are reference material now, not the thing you look at first */
+.spec-more{border:2px solid var(--fold);border-radius:var(--r);background:var(--paper);padding:0 18px}
+.spec-more summary{cursor:pointer;padding:16px 4px;display:flex;flex-wrap:wrap;align-items:baseline;gap:12px}
+.spec-more summary::marker{color:var(--slate)}
+.spec-more .tw{font:800 12px var(--sans);letter-spacing:1.1px;text-transform:uppercase;color:var(--ink)}
+.spec-more .sub{font:600 12.5px var(--sans);color:var(--slate-text)}
+.spec-more[open]{padding-bottom:22px}
+.spec-more[open] summary{border-bottom:2px solid var(--fold);margin-bottom:22px}
+
+/* Comparing a grotesque to a high-contrast serif tells you nothing you didn't already know.
+   Comparing four grotesques to each other is where the differences actually live. */
+.set-head{grid-column:1/-1;display:flex;align-items:baseline;gap:12px;margin:12px 0 -2px}
+.set-head:first-child{margin-top:0}
+.set-head span{font:800 11.5px var(--sans);letter-spacing:1.3px;text-transform:uppercase;color:var(--ink)}
+.set-head i{font:600 12.5px var(--sans);font-style:normal;color:var(--slate-text);white-space:nowrap}
+.set-head::after{content:"";flex:1;height:2px;background:var(--fold);align-self:center}
+
+/* The diff: the candidate's glyph filled, the incumbent's SAME glyph outlined behind it at the
+   same size and origin. Where the two outlines part company is the difference between the faces —
+   which is a thing you can see in half a second and never get from two words side by side. */
+.spec-glyph{position:relative;display:inline-block;line-height:.95;font-size:76px;font-weight:var(--wb)}
+.spec-glyph .ghost{position:absolute;left:0;top:0;font-family:'Bricolage Grotesque',sans-serif;
+  font-weight:800;font-variation-settings:normal;color:transparent;-webkit-text-stroke:1.4px var(--slate-soft);
+  pointer-events:none}
+/* the candidate sits ON TOP of the reference outline — the other way round the outline cuts through
+   the filled glyph and both shapes turn to mud */
+.spec-glyph .fill{position:relative;z-index:1}
+.spec-card[data-ref="1"] .spec-glyph .ghost{display:none}
+
+/* Set width, measured live from the real outlines at load — this is the number that explains why
+   one face needs three lines for a headline another sets in two. */
+.spec-w{display:flex;align-items:center;gap:11px;margin-top:15px;
+  font:700 10.5px var(--sans);letter-spacing:.7px;text-transform:uppercase;color:var(--slate-text)}
+.spec-w .track{position:relative;flex:1;height:8px;border-radius:6px;background:var(--fold);overflow:visible}
+.spec-w .track i{position:absolute;top:0;bottom:0;left:0;border-radius:6px;background:var(--aizome);width:0;
+  transition:width .5s var(--ease-soft)}
+.spec-w .track u{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--persimmon);text-decoration:none}
+.spec-w b{font-weight:800;font-size:12.5px;color:var(--ink);min-width:38px;text-align:right;letter-spacing:0}
+.spec-word{font-size:38px;font-weight:var(--w);line-height:1.1;letter-spacing:-.02em}
+.spec-ital{font-size:23px;font-weight:var(--w);font-style:italic;color:var(--ink-soft);line-height:1.35;margin-top:2px}
+.spec-card[data-ital="0"] .spec-ital{font-style:normal;letter-spacing:.02em}
+.spec-caps{font-size:13px;font-weight:var(--wb);letter-spacing:1.7px;text-transform:uppercase;color:var(--aizome);margin-top:10px}
+.spec-set{font-size:12.5px;font-weight:var(--w);letter-spacing:.06em;color:var(--slate-text);
+  /* wrap at the spaces between the three runs only — break-all splits the alphabet mid-word,
+     which is exactly the thing a charset line exists to let you read */
+  margin-top:14px;padding-top:14px;border-top:2px solid var(--fold);overflow-wrap:break-word;line-height:1.75}
+.spec-meta{font:600 12px/1.55 var(--sans);color:var(--slate-text);margin-top:12px}
+.spec-meta b{color:var(--ink);font-weight:800}
+.spec-pick{margin-top:16px;width:100%;height:46px;font-size:14px}
+.spec-card.on .spec-pick{--bg:var(--fold);--lipc:var(--locked-lip);color:var(--slate-text);cursor:default}
+.type-bar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:18px;
+  font:600 13.5px var(--sans);color:var(--slate-text)}
+.type-bar .now{font-family:var(--display);font-weight:800;font-size:20px;color:var(--ink);letter-spacing:-.01em}
+.type-bar .sep{flex:1}
+
+/* the stage — the cards prove the letterforms, the stage proves the face doing the actual job.
+   --k scales the whole lockup so the ratios stay exact when two panes share the width. */
+.stage{display:grid;grid-template-columns:1fr;gap:18px;margin-bottom:22px;--k:1}
+.stage.split{grid-template-columns:1fr 1fr;--k:.6}
+.stage-pane{position:relative;border:2px solid var(--fold);border-radius:var(--r);background:var(--card);
+  padding:26px;overflow:hidden;font-family:var(--f);font-variation-settings:var(--vf,normal);
+  transition:border-color .25s}
+.stage-pane[data-side="b"]{display:none}
+/* B gets a tinted BORDER and a blue tag dot, never a tinted ground — two faces judged on two
+   different backgrounds is not a comparison, it is a lighting trick. */
+.stage.split .stage-pane[data-side="b"]{display:block;border-color:var(--sel-lip)}
+.stage-tag{position:absolute;top:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 15px;
+  border-left:2px solid var(--fold);border-bottom:2px solid var(--fold);border-bottom-left-radius:var(--r);
+  background:var(--paper);font:800 11px var(--sans);letter-spacing:1px;text-transform:uppercase;color:var(--slate-text)}
+.stage-tag .dot{width:8px;height:8px;border-radius:50%;background:var(--persimmon)}
+.stage-pane[data-side="b"] .stage-tag .dot{background:var(--aizome)}
+.stage-lock{display:flex;align-items:center;gap:calc(12px*var(--k));margin-bottom:calc(26px*var(--k))}
+.stage-lock img{width:calc(40px*var(--k));height:calc(40px*var(--k));animation:none}
+.stage-lock .w{font-size:calc(32px*var(--k));font-weight:var(--wb);color:var(--ink);line-height:1}
+.stage-h{font-size:calc(60px*var(--k));line-height:1.05;font-weight:var(--w);color:var(--ink);
+  margin-bottom:calc(20px*var(--k))}
+.stage-lede{font:600 calc(17px*var(--k))/1.55 var(--sans);color:var(--slate-text);max-width:34em;
+  margin-bottom:calc(24px*var(--k))}
+.stage-cta{display:inline-flex;align-items:center;height:calc(54px*var(--k));padding:0 calc(24px*var(--k));
+  border-radius:var(--r);background:var(--ink);box-shadow:0 4px 0 var(--ink-lip);color:var(--paper);
+  font:800 calc(15px*var(--k))/1 var(--sans);letter-spacing:.6px;text-transform:uppercase}
+.stage-fall{display:flex;flex-wrap:wrap;align-items:flex-end;gap:calc(26px*var(--k));
+  margin-top:calc(28px*var(--k));padding-top:calc(20px*var(--k));border-top:2px solid var(--fold)}
+.stage-fall div{display:flex;flex-direction:column;gap:8px}
+.stage-fall b{font-weight:var(--w);color:var(--ink);line-height:.9}
+/* the ladder is the REAL scale at --k:1 — 68/50/32 — so the labels under it are true, not decorative */
+.stage-fall .s1{font-size:calc(68px*var(--k))}
+.stage-fall .s2{font-size:calc(50px*var(--k))}
+.stage-fall .s3{font-size:calc(32px*var(--k))}
+.stage-fall i{font:800 10.5px var(--sans);font-style:normal;letter-spacing:.9px;text-transform:uppercase;color:var(--slate-text)}
+.stage-note{font:600 11.5px var(--sans);color:var(--slate);margin-top:14px}
+.stage.split .stage-note{display:none}
+
+@media(max-width:900px){
+  .hero .wrap,.feature .wrap,.super .wrap{max-width:1000px;grid-template-columns:1fr;gap:44px}
+  .feature.flip .art{order:0}
+  .display{font-size:38px}.display-xl{font-size:42px}.super-word{font-size:44px}.final .display{font-size:40px}
+  .footer .cols{grid-template-columns:repeat(2,1fr)}
+  .rules,.type-row{grid-template-columns:1fr}
+  .rhythm{flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+<script>document.body.classList.add('js')</script>
+
+<div class="dock" id="dock">
+  <div class="switcher" role="tablist" aria-label="View">
+    <button id="tab-site" class="on" type="button" role="tab" aria-selected="true" aria-controls="view-site">Website</button>
+    <button id="tab-ds" type="button" role="tab" aria-selected="false" aria-controls="view-ds">System</button>
+    <button id="tab-gfx" type="button" role="tab" aria-selected="false" aria-controls="view-gfx">Graphics</button>
+    <button id="tab-copy" type="button" role="tab" aria-selected="false" aria-controls="view-copy">Copy</button>
+  </div>
+  <button class="dock-toggle" id="dockToggle" type="button" aria-expanded="true" aria-label="Hide the view switcher">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+</div>
+
+<div id="view-site" role="tabpanel" aria-labelledby="tab-site">
+<!-- ══ LEVEL 1 · WEBSITE ══════════════════════════════════════════════
+     One band = one screen = one idea. Build in this order:
+       nav → hero (art | copy + CTA + proof) → strip → feature bands
+       → showpiece band → dark upsell band → closing band + curve → footer
+     Art that is one drawing = <img class="solo">. Art split into objects
+     = .scene > .pc. Put .rise on whatever should arrive.
+     RULE: nothing animates on its own. Scroll is the only clock.
+================================================================== -->
+<nav class="nav" id="nav"><div class="wrap">
+  <a class="logo" href="#"><img src="img/YOUR-MARK.webp" alt=""><span class="word">yourbrand</span></a>
+  <a class="btn btn-sm" href="#">Get started</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <div class="hero-art rise rise-pop"><!-- TODO hero art: .scene or <img class="solo"> --></div>
+  <div class="hero-copy">
+    <h1 class="hero-h1 rise d1">TODO headline</h1>
+    <div class="hero-cta rise d2">
+      <a class="btn" href="#">Get started</a>
+      <a class="btn btn-ghost" href="#">Log in</a>
+    </div>
+    <div class="trust rise d3"><!-- TODO stars + rating, centred on the 320px CTA column --></div>
+    <div class="trust-co rise d3"><span class="row"><!-- TODO logo marks --></span></div>
+  </div>
+</div></header>
+
+<section class="feature" data-sec="one"><div class="wrap">
+  <div class="copy rise rise-l">
+    <div class="eyebrow">TODO label</div>
+    <h2 class="display">TODO heading</h2>
+    <p class="lede">TODO one paragraph. Say the specific thing.</p>
+  </div>
+  <div class="art rise rise-pop d1"><!-- TODO art --></div>
+</div></section>
+<!-- TODO more bands: alternate .flip, give two of them .bleed-r / .bleed-l -->
+</div><!-- /site -->
+
+<!-- ================= SYSTEM VIEW ================= -->
+<div id="view-ds" role="tabpanel" aria-labelledby="tab-ds" hidden>
+<!-- ══ LEVEL 2 · SYSTEM ═══════════════════════════════════════════════
+     Document what Level 1 already proved. Never invent a token here that
+     the website does not use — this view is a mirror, not a wishlist.
+     Panels: rhythm · typography · buttons · components · palette · rules
+================================================================== -->
+<section class="ds-hero"><div class="wrap">
+  <h2 class="display">yourbrand design system</h2>
+  <p class="lede">TODO one line on what the system is for.</p>
+</div></section>
+
+<section class="ds-section"><div class="wrap">
+  <div class="rule">Where this came from</div>
+  <!-- TODO the steal list. 3+ references, what each contributed, and one line on
+       what makes this different from all of them. No reference supplies more than
+       two decisions — more than that and you cloned it. See references/01-website.md -->
+</div></section>
+
+<section class="ds-section"><div class="wrap">
+  <div class="rule">Rhythm — one section, one screen, one thought</div>
+  <div class="ds-grid"><!-- TODO band diagram --></div>
+</div></section>
+
+<section class="ds-section"><div class="wrap">
+  <div class="rule">Typography</div>
+  <!-- TODO one .spec-card per role: display-xl, display, h1, lede, eyebrow, label.
+       Each renders the live face at its real size with the spec line beneath. -->
+</div></section>
+
+<section class="ds-section"><div class="wrap">
+  <div class="rule">Palette — click to copy</div>
+  <!-- TODO .sw swatches. Every text colour carries its MEASURED contrast ratio. -->
+</div></section>
+</div><!-- /ds -->
+
+<!-- ================= GRAPHICS VIEW ================= -->
+<div id="view-gfx" role="tabpanel" aria-labelledby="tab-gfx" hidden>
+<!-- ══ LEVEL 3 · GRAPHICS ═════════════════════════════════════════════
+     The art direction, as an inventory. EVERY asset that ships on the
+     website appears here as an image card with filename, ratio and role.
+     Panels: the cast · construction rules · asset inventory · model sheet
+             · motion · art palette · the type set
+     The type set MUST carry the licence notice.
+     See references/fonts-and-licensing.md
+================================================================== -->
+<section class="ds-hero"><div class="wrap">
+  <h2 class="display">the graphics system</h2>
+  <p class="lede">TODO one line on the visual world.</p>
+</div></section>
+
+<section class="ds-section"><div class="wrap">
+  <div class="rule">Asset inventory</div>
+  <div class="art-grid">
+    <!-- TODO one card per asset:
+    <div class="art-card"><img src="img/s1-hero.webp" alt=""><b>s1 · hero</b><span>4:3 · scene, 3 pieces</span></div>
+    -->
+  </div>
+</div></section>
+
+<section class="ds-section"><div class="wrap">
+  <div class="rule">The type set</div>
+  <!-- TODO candidates, each with designer · foundry · source.
+       REQUIRED: the licence FYI block — copy it from example/yourbrand. -->
+</div></section>
+</div><!-- /gfx -->
+
+<div id="view-copy" role="tabpanel" aria-labelledby="tab-copy" hidden>
+<!-- ══ LEVEL 4 · COPY ═════════════════════════════════════════════════
+     The words, as a system. Panels: where it comes from · signs of AI
+     writing · the cleanse · five principles · every line before → after
+     · the live Magic-copy toggle
+================================================================== -->
+<section class="ds-hero"><div class="wrap">
+  <h2 class="display">the copy system</h2>
+  <p class="lede">TODO one line: every line on this site, rewritten and de-slopped.</p>
+  <button class="btn" id="copy-toggle" type="button">Activate magic copy</button>
+</div></section>
+
+<section class="ds-section"><div class="wrap">
+  <div class="rule">Five principles</div>
+  <!-- TODO your five. Each: the name, the one-line why, a before/after pair. -->
+</div></section>
+</div><!-- /copy -->
+
+
+<script>
+const nav=document.getElementById('nav');
+addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>300),{passive:true});
+
+/* rootMargin pulls the trigger line 12% up from the viewport bottom. With threshold alone a tall
+   element fired on a 67px sliver, so at real scroll speed the 600ms reveal finished mid-screen. */
+const io=new IntersectionObserver(es=>es.forEach(e=>{
+  if(!e.isIntersecting)return;
+  e.target.classList.add('in');
+  io.unobserve(e.target);
+  /* the stagger delay is for the entrance only — strip it after, or every later
+     transition on that element carries a permanent lag */
+  const d=[...e.target.classList].find(c=>/^d[1-5]$/.test(c));
+  if(d)setTimeout(()=>e.target.classList.remove(d),1100);
+  const f=e.target.querySelector?e.target.querySelector('.fill'):null;
+  if(f)f.style.width=(f.dataset.w||60)+'%';
+}),{threshold:.15,rootMargin:'0px 0px -12% 0px'});
+function observeAll(){
+  document.querySelectorAll('.rise:not(.in)').forEach(el=>io.observe(el));
+  document.querySelectorAll('.progress').forEach(p=>io.observe(p));
+}
+observeAll();
+/* safety: never leave content invisible if the observer is slow or unsupported */
+/* hard fallback: if the observer never fires, nothing may stay invisible */
+setTimeout(()=>{
+  const fired=document.querySelectorAll('.rise.in').length;
+  if(!fired)document.querySelectorAll('.rise').forEach(el=>el.classList.add('in'));
+  else document.querySelectorAll('.rise:not(.in)').forEach(el=>{
+    if(el.getBoundingClientRect().top<innerHeight)el.classList.add('in');
+  });
+},1200);
+
+document.querySelectorAll('#quiz .opt').forEach(o=>o.addEventListener('click',()=>{
+  document.querySelectorAll('#quiz .opt').forEach(x=>x.classList.remove('sel','ok','no'));
+  o.classList.add('sel');
+  setTimeout(()=>{o.classList.remove('sel');o.classList.add(o.dataset.a)},320);
+}));
+
+document.querySelectorAll('.sw').forEach(s=>s.addEventListener('click',()=>{
+  navigator.clipboard&&navigator.clipboard.writeText(s.dataset.x);
+  const b=s.style.borderColor;s.style.borderColor='#5C7A4A';setTimeout(()=>s.style.borderColor=b,800);
+}));
+
+(()=>{
+  const strip=document.getElementById('strip');
+  const chevs=[...document.querySelectorAll('.chev')];
+  if(!strip||chevs.length<2)return;
+  const page=()=>Math.max(200,Math.round(strip.clientWidth*.7));
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /* the course row rides the same scroll clock as the art: scrolling the page cycles it
+     sideways, and the chevrons nudge an offset on top of that. Nothing moves on its own. */
+  let user=0;
+  const target=()=>{
+    const max=strip.scrollWidth-strip.clientWidth;
+    return Math.max(0,Math.min(max,scrollY*0.5+user));
+  };
+  chevs.forEach((c,i)=>c.addEventListener('click',()=>{
+    user+=i?page():-page();
+    strip.scrollTo({left:target(),behavior:'smooth'});
+  }));
+  if(!reduce)addEventListener('scroll',()=>{strip.scrollLeft=target();},{passive:true});
+  const sync=()=>{
+    const max=strip.scrollWidth-strip.clientWidth-2;
+    chevs[0].disabled=strip.scrollLeft<=2;
+    chevs[1].disabled=strip.scrollLeft>=max;
+  };
+  strip.addEventListener('scroll',sync,{passive:true});
+  addEventListener('resize',sync); sync();
+})();
+
+
+/* live lesson demo — the product, actually running.
+   Two questions, then a completion state. The reward is SEQUENCED: option → footer → counter →
+   progress, ~80ms apart. Firing all four in one frame made the moment flat. */
+(()=>{
+  const root=document.getElementById('lesson'); if(!root)return;
+  const qEl=root.querySelector('.lesson-q'), subEl=root.querySelector('.lesson-sub'),
+        quiz=root.querySelector('.quiz'), check=document.getElementById('lesson-check'),
+        toast=document.getElementById('lesson-toast'), heartWrap=root.querySelector('.lesson-hearts'),
+        hearts=document.getElementById('hearts'), xp=document.getElementById('xp'),
+        xpChip=xp.closest('.chip'), fill=root.querySelector('.fill'),
+        foot=root.querySelector('.lesson-foot');
+
+  const QS=[
+    {q:'Which prompt gets the better answer?',sub:'Unit 2 · Prompting basics · Lesson 4 of 10',w:50,
+     a:[['no','"Write about dogs"'],['ok','"Write a 3-step crate-training guide for first-time puppy owners"'],['no','"dogs info please"']]},
+    {q:'The answer is close but too formal. What do you do?',sub:'Unit 2 · Prompting basics · Lesson 4 of 10',w:60,
+     a:[['no','Start a brand new chat'],['no','Ask the same thing again, louder'],['ok','Tell it what to change and ask for a rewrite']]}
+  ];
+
+  let i=0, picked=null, busy=false, xpVal=1240, heartVal=5;
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const wait=ms=>new Promise(r=>setTimeout(r,reduce?0:ms));
+
+  /* count up rather than swapping the string — this is the reward, it should move */
+  function countTo(el,from,to,ms){
+    if(reduce){el.textContent=to.toLocaleString();return}
+    const t0=performance.now();
+    (function step(t){
+      const p=Math.min(1,(t-t0)/ms), e=1-Math.pow(1-p,3);
+      el.textContent=Math.round(from+(to-from)*e).toLocaleString();
+      if(p<1)requestAnimationFrame(step);
+    })(t0);
+    /* rAF is paused in a hidden tab — guarantee the number lands even if it never resumes */
+    setTimeout(()=>{el.textContent=to.toLocaleString()},ms+120);
+  }
+
+  function render(){
+    const s=QS[i];
+    qEl.textContent=s.q; subEl.textContent=s.sub;
+    quiz.innerHTML=s.a.map(([a,t],n)=>
+      `<button class="opt" data-a="${a}"><span class="key">${'ABC'[n]}</span>${t}</button>`).join('');
+    quiz.querySelectorAll('.opt').forEach(o=>o.addEventListener('click',()=>pick(o)));
+    picked=null; check.disabled=true; check.classList.add('is-off');
+    toast.classList.remove('show','miss');
+  }
+  function pick(o){
+    if(busy)return;
+    quiz.querySelectorAll('.opt').forEach(x=>x.classList.remove('sel'));
+    o.classList.add('sel'); picked=o;
+    check.disabled=false; check.classList.remove('is-off');
+  }
+
+  check.addEventListener('click',async()=>{
+    if(!picked||busy)return;
+    busy=true; check.disabled=true; check.classList.add('is-off');
+    const right=picked.dataset.a==='ok', s=QS[i];
+    picked.classList.remove('sel'); picked.classList.add(right?'ok':'no');   // 0ms
+    await wait(90);
+    toast.textContent=right?'✓ +10 XP':'✕ −1 heart';
+    toast.classList.toggle('miss',!right);
+    toast.classList.add('show');                                             // 90ms
+    await wait(110);
+    if(right){
+      xpChip.classList.add('bump'); countTo(xp,xpVal,xpVal+10,600); xpVal+=10; // 200ms
+      setTimeout(()=>xpChip.classList.remove('bump'),520);
+      await wait(80); fill.style.width=s.w+'%';                              // 280ms
+    }else{
+      heartWrap.classList.add('lost');
+      setTimeout(()=>{hearts.textContent=--heartVal;heartWrap.classList.remove('lost')},180);
+      await wait(260);
+      quiz.querySelector('[data-a="ok"]').classList.add('ok');
+    }
+    await wait(right?1250:1900);
+    if(++i<QS.length){ render(); busy=false; }
+    else finish();
+  });
+
+  /* Reuses the Check button as the reset, so the widget never becomes a dead screenshot
+     the way a one-shot demo does. */
+  function finish(){
+    fill.style.width='100%';
+    qEl.textContent='Lesson complete.';
+    subEl.textContent='You banked '+(xpVal-1240)+' XP and your streak is safe.';
+    quiz.innerHTML='';
+    toast.textContent='✓ 8 day streak'; toast.classList.remove('miss'); toast.classList.add('show');
+    check.textContent='Try it again'; check.disabled=false; check.classList.remove('is-off');
+    check.dataset.reset='1'; busy=false;
+  }
+
+  check.addEventListener('click',()=>{
+    if(check.dataset.reset!=='1')return;
+    delete check.dataset.reset;
+    check.textContent='Check';
+    i=0; xpVal=1240; heartVal=5; busy=false;
+    xp.textContent='1,240'; hearts.textContent='5'; fill.style.width='40%';
+    render();
+  },true);
+
+  render();
+})();
+
+/* ---------- scroll engine ----------
+   One rAF loop, running only while the page is actually scrolling. It maps each scene's
+   distance from the viewport centre to --a (0 centred -> 1 at the edges) and --r (signed),
+   then eases toward that target so motion glides instead of tracking the wheel 1:1.
+   Videos are SCRUBBED on the same clock: currentTime follows scroll, they never autoplay.
+   The page is completely inert when still — no idle animation anywhere. */
+(()=>{
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const scenes=[...document.querySelectorAll('.scene')].map(el=>({el,a:0,r:0}));
+  const solos=[...document.querySelectorAll('.solo')].map(el=>({el,a:0,r:0}));
+  const vids=[...document.querySelectorAll('.scene-v video, video.pc-v')].map(v=>{
+    v.pause(); v.removeAttribute('autoplay'); v.loop=false; v.muted=true;
+    v.preload='auto'; v.playsInline=true;
+    return {v,t:0,ready:false,host:v.closest('section')||v.parentElement};
+  });
+  vids.forEach(o=>{
+    const mark=()=>{o.ready=(o.v.readyState>=2)&&isFinite(o.v.duration)&&o.v.duration>0;};
+    o.v.addEventListener('loadedmetadata',mark); o.v.addEventListener('canplay',mark); mark();
+  });
+
+  const ease=x=>1-Math.pow(1-x,1.9);   // ease-OUT: reacts immediately, settles late
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  let running=false, idle=0;
+
+  function progress(el){
+    const r=el.getBoundingClientRect(), vh=innerHeight;
+    const d=((r.top+r.height/2)-vh/2)/((vh+r.height)/2);
+    return Math.max(-1,Math.min(1,d));
+  }
+
+  function step(k){
+    let moved=false;
+    for(const s of scenes){
+      const p=progress(s.el);
+      const ta=ease(Math.min(1,Math.abs(p))), tr=p;
+      s.a=lerp(s.a,ta,k*1.5); s.r=lerp(s.r,tr,k*1.5);
+      if(Math.abs(s.a-ta)>.0015||Math.abs(s.r-tr)>.0015) moved=true;
+      s.el.style.setProperty('--a',s.a.toFixed(4));
+      s.el.style.setProperty('--r',s.r.toFixed(4));
+    }
+    for(const s of solos){
+      const p=progress(s.el);
+      const ta=ease(Math.min(1,Math.abs(p))), tr=p;
+      s.a=lerp(s.a,ta,k*1.5); s.r=lerp(s.r,tr,k*1.5);
+      if(Math.abs(s.a-ta)>.0015||Math.abs(s.r-tr)>.0015) moved=true;
+      s.el.style.setProperty('--sa',s.a.toFixed(4));
+      s.el.style.setProperty('--sr',s.r.toFixed(4));
+    }
+    for(const o of vids){
+      if(!o.ready){ moved=true; continue; }
+      const p=(1-progress(o.host))/2;
+      const target=Math.max(0,Math.min(o.v.duration-0.05,p*o.v.duration));
+      o.t=lerp(o.t,target,Math.min(1,k*1.3));
+      if(Math.abs(o.v.currentTime-o.t)>0.02){ try{o.v.currentTime=o.t;}catch(e){} moved=true; }
+    }
+    return moved;
+  }
+  function frame(){
+    const moved=step(.12);
+    idle = moved ? 0 : idle+1;
+    if(idle<20) requestAnimationFrame(frame); else running=false;
+  }
+  function kick(){
+    step(.34);                     // land immediately on this scroll event...
+    if(!running && !reduce){ running=true; idle=0; requestAnimationFrame(frame); }  // ...then ease
+  }
+  window.__scrollStep=step;        // verification hook
+  addEventListener('scroll',kick,{passive:true});
+  addEventListener('resize',kick,{passive:true});
+  kick();
+})();
+
+const views={site:'view-site',ds:'view-ds',gfx:'view-gfx',copy:'view-copy'};
+const tabs={site:'tab-site',ds:'tab-ds',gfx:'tab-gfx',copy:'tab-copy'};
+function show(which){
+  for(const k in views){
+    document.getElementById(views[k]).hidden=k!==which;
+    const t=document.getElementById(tabs[k]);
+    t.classList.toggle('on',k===which);
+    t.setAttribute('aria-selected',String(k===which));
+  }
+  scrollTo(0,0);
+  history.replaceState(null,'',which==='site'?'#':'#'+which);
+  observeAll();
+}
+for(const k in tabs)document.getElementById(tabs[k]).addEventListener('click',()=>show(k));
+
+/* collapse the dock — remembered for the session, so it stays out of the way while you browse */
+(()=>{
+  const dock=document.getElementById('dock'), t=document.getElementById('dockToggle');
+  if(!dock||!t)return;
+  const set=shut=>{
+    dock.classList.toggle('shut',shut);
+    t.setAttribute('aria-expanded',String(!shut));
+    t.setAttribute('aria-label',shut?'Show the view switcher':'Hide the view switcher');
+    try{sessionStorage.setItem('ds-dock',shut?'shut':'open')}catch(e){}
+  };
+  t.addEventListener('click',()=>set(!dock.classList.contains('shut')));
+  try{if(sessionStorage.getItem('ds-dock')==='shut')set(true)}catch(e){}
+})();
+if(location.hash==='#ds')show('ds');
+if(location.hash==='#gfx')show('gfx');
+if(location.hash==='#copy')show('copy');
+
+/* ---------- the type set: swap the display face live ----------
+   Swapping --display alone is not enough. Every display face carries its own tracking and its own
+   idea of what "bold" means, so a face dropped into another face's letter-spacing looks broken —
+   and asking 700 of a family that only ships 400 gets you a synthetic bold. Each pick therefore
+   writes a correction sheet: real weights, and each display rule's own tracking plus that face's
+   delta, so the -0.02em on .display and the -0.025em on .display-xl both survive the swap. */
+(()=>{
+  const set=document.getElementById('typeSet'); if(!set)return;
+  /* the grid now holds group headings too, so never iterate set.children */
+  const CARDS=[...set.querySelectorAll('.spec-card')], REF=CARDS[0];
+  const now=document.getElementById('fontNow'), reset=document.getElementById('fontReset');
+  /* appended to <head> AFTER the main sheet, so equal-specificity rules win on document order */
+  const sheet=document.createElement('style'); document.head.appendChild(sheet);
+  const BASE={'.display':-.02,'.display-xl':-.025,'.super-word':-.02,'.logo .word':-.02,'.login-title':0};
+
+  const stage=document.getElementById('stage');
+  const paneA=stage.querySelector('[data-side="a"]'), paneB=stage.querySelector('[data-side="b"]');
+  const cmp=document.getElementById('fontCompare'), swap=document.getElementById('fontSwap');
+  let committed=CARDS[0], hoverCard=null;
+
+  /* the stage carries the same two corrections as the document, or the comparison lies:
+     face B would be judged wearing face A's tracking. */
+  function dress(pane,card){
+    const adj=parseFloat(card.dataset.adj||0);
+    pane.style.setProperty('--f',card.style.getPropertyValue('--f'));
+    pane.style.setProperty('--w',card.dataset.w);
+    pane.style.setProperty('--wb',card.dataset.wb);
+    pane.style.setProperty('--vf',card.dataset.vf||'normal');
+    pane.querySelector('.stage-h').style.letterSpacing=(-.025+adj).toFixed(4)+'em';
+    pane.querySelector('.stage-lock .w').style.letterSpacing=(-.02+adj).toFixed(4)+'em';
+    pane.querySelectorAll('.stage-fall b').forEach(b=>b.style.letterSpacing=(-.02+adj).toFixed(4)+'em');
+    pane.querySelector('.nm').textContent=card.dataset.f;
+    pane.dataset.face=card.dataset.f;
+  }
+
+  function apply(card,persist){
+    const f=card.dataset.f, w=card.dataset.w, wb=card.dataset.wb;
+    const adj=parseFloat(card.dataset.adj||0), vf=card.dataset.vf||'normal';
+    /* test sans-serif FIRST — "sans-serif" contains "serif", so the naive test picks serif for every face */
+    const generic=/sans-serif/.test(card.style.getPropertyValue('--f'))?'sans-serif':'serif';
+    document.documentElement.style.setProperty('--display',`'${f}','Plus Jakarta Sans',${generic}`);
+    sheet.textContent=Object.entries(BASE).map(([sel,ls])=>
+      `${sel}{letter-spacing:${(ls+adj).toFixed(4)}em;font-weight:${sel==='.logo .word'||sel==='.super-word'?wb:w};font-variation-settings:${vf}}`
+    ).join('');
+    for(const c of CARDS){
+      const on=c===card;
+      c.classList.toggle('on',on);
+      c.querySelector('.spec-pick').textContent=on?'In use':'Use this face';
+      const row=ROWS.get(c); if(row)row.classList.toggle('on',on);
+    }
+    now.textContent=f;
+    committed=card; dress(paneA,card);
+    /* the chosen face survives a reload — otherwise every comparison starts from scratch */
+    if(persist)try{localStorage.setItem('yourbrand-display',f)}catch(e){}
+  }
+
+  set.addEventListener('click',e=>{
+    const card=e.target.closest('.spec-card'); if(card)apply(card,true);
+  });
+  reset.addEventListener('click',()=>apply(REF,true));
+
+  /* Hover is a TRY, not a commit: in split mode it loads the B pane, otherwise it previews on the
+     single stage and snaps back on the way out. Nothing outside the stage moves until you click. */
+  set.addEventListener('pointerover',e=>{
+    const card=e.target.closest('.spec-card'); if(!card||card===hoverCard)return;
+    hoverCard=card; dress(stage.classList.contains('split')?paneB:paneA,card);
+  });
+  set.addEventListener('pointerleave',()=>{
+    hoverCard=null; if(!stage.classList.contains('split'))dress(paneA,committed);
+  });
+
+  cmp.addEventListener('click',()=>{
+    const on=stage.classList.toggle('split');
+    cmp.textContent=on?'Single stage':'Compare two';
+    swap.hidden=!on;
+    dress(paneA,committed);
+    if(on)dress(paneB,hoverCard&&hoverCard!==committed?hoverCard:
+      CARDS.find(c=>c!==committed));
+  });
+  /* Reverse out — the check that actually separates display faces, and not decoration: Yourbrand has a
+     real midnight band, and a face that holds together on warm paper can go thin and rattly knocked
+     out of the dark. Three colour dots per row would have been identical on all ten and told you nothing. */
+  const rev=document.getElementById('fontRev');
+  rev.addEventListener('click',()=>{
+    const on=stackEl.classList.toggle('rev');
+    rev.textContent=on?'Back to paper':'Reverse out';
+  });
+
+  swap.addEventListener('click',()=>{
+    const b=CARDS.find(c=>c.dataset.f===paneB.dataset.face);
+    if(!b)return;
+    const wasA=committed;
+    apply(b,true);            // B becomes the committed face everywhere
+    dress(paneB,wasA);        // and the face it beat moves into the comparison slot
+  });
+
+  /* Build the stack from the cards themselves — one source of truth, so a face can never appear in
+     the stack with different weights than its specimen. */
+  const stackEl=document.getElementById('typeStack');
+  const ROWS=new Map();
+  CARDS.forEach((c,i)=>{
+    const li=document.createElement('li');
+    li.className='stack-row'+(i===0?' on':'');
+    li.style.cssText=c.style.cssText;
+    li.innerHTML='<span class="stack-lead"><span class="stack-amp">&amp;</span>'+
+      '<span class="stack-word">Yourbrand</span></span><span class="stack-meta">'+
+      (c.dataset.rec==='1'?'<button type="button" class="rec" aria-expanded="false" title="Why this is the pick"><span class="tx">Recommended</span><span class="cx">+</span></button>':'')+
+      `<span class="it">${c.dataset.ital==='1'?'italic':'no italic'}</span>`+
+      /* clone and strip the chip first — reading the head span raw drags "Recommended" into the class label */
+      `<span class="cls">${(()=>{const h=c.querySelector('.spec-head span:last-child').cloneNode(true);
+        h.querySelectorAll('.rec').forEach(x=>x.remove());return h.textContent.trim();})()}</span>`+
+      `<span class="nm">${c.dataset.f}</span><span class="ix">—</span></span>`;
+    li.addEventListener('click',e=>{
+      if(e.target.closest('.rec'))return;   /* the chip explains, the row commits */
+      apply(c,true);
+    });
+    li.addEventListener('pointerenter',()=>{
+      hoverCard=c; dress(stage.classList.contains('split')?paneB:paneA,c);
+    });
+    stackEl.appendChild(li);
+    ROWS.set(c,li);
+
+    /* the recommendation earns a drawer rather than a footnote — you click the claim to get the case */
+    const chip=li.querySelector('.rec');
+    if(chip){
+      const why=document.createElement('li');
+      why.className='why-row'; why.hidden=true;
+      why.innerHTML='<div class="in"><h6>Why Chubbo</h6>'+
+        '<p>A judgement call, not a measurement — but it is the only face here whose skeleton matches the '+
+        'artwork. Heavy, rounded, weight sitting low in the letter, with slab ends that read like the folded '+
+        'facets on the characters.</p>'+
+        '<p>Warm without going childish, which is the exact line this brand walks: a learning app that has to '+
+        'feel like a game and bill like a product. It ships a <b>true italic</b>, and at <b>103</b> set width it '+
+        'drops into the existing layout without moving anything.</p>'+
+        '<p><b>Runner-up: Fraunces</b> if the brand should feel more crafted than cheerful. <b>Cabinet Grotesk</b> '+
+        'is the better wordmark but colder than the owl deserves. <b>Boska</b> and <b>Zodiak</b> are the most '+
+        'beautiful things on this sheet and the wrong answer — high-contrast editorial serifs read as fashion, '+
+        'not as 5 minutes on the train.</p></div>';
+      stackEl.appendChild(why);
+      chip.addEventListener('click',ev=>{
+        ev.stopPropagation();
+        const open=why.hidden;
+        why.hidden=!open;
+        chip.setAttribute('aria-expanded',String(open));
+        /* the label stays "Recommended" — it is the row's badge, not a disclosure control;
+           only the +/x glyph changes so the row never loses its flag while the drawer is open */
+        chip.querySelector('.cx').textContent=open?'\u00d7':'+';
+      });
+    }
+  });
+  stackEl.addEventListener('pointerleave',()=>{
+    hoverCard=null; if(!stage.classList.contains('split'))dress(paneA,committed);
+  });
+
+  /* Set width, measured off the real outlines rather than asserted. One offscreen probe, the same
+     word at the same size in each face, indexed against the incumbent — this is the number that
+     explains why one face needs three lines for a headline another sets in two. Must wait for
+     fonts.ready: measure early and every face reports the fallback's metrics. */
+  function gauge(){
+    const probe=document.createElement('span');
+    /* 68px, not some arbitrary large size: Bricolage and Fraunces both carry an OPTICAL SIZE axis,
+       so measuring at 200px reports a different instance than the one the page ever renders — the
+       index came out 8% wrong against the stack until this matched the real display size. */
+    probe.style.cssText='position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;font-size:68px';
+    probe.textContent='Yourbrand';
+    document.body.appendChild(probe);
+    const measure=c=>{
+      probe.style.fontFamily=c.style.getPropertyValue('--f');
+      probe.style.fontWeight=c.dataset.w;
+      probe.style.fontVariationSettings=c.dataset.vf||'normal';
+      return probe.getBoundingClientRect().width;
+    };
+    const base=measure(REF)||1;
+    for(const c of CARDS){
+      const idx=Math.round(measure(c)/base*100);
+      /* track spans 70-130; the persimmon tick is the incumbent at 100 */
+      const pos=v=>Math.max(0,Math.min(100,(v-70)/60*100));
+      c.querySelector('.spec-w .track i').style.width=pos(idx)+'%';
+      c.querySelector('.spec-w .track u').style.left=pos(100)+'%';
+      c.querySelector('.spec-w b').textContent=idx;
+      c.querySelector('.spec-w span').textContent=c===REF?'set width · base':'set width';
+      const row=ROWS.get(c); if(row)row.querySelector('.ix').textContent=idx;
+    }
+    probe.remove();
+  }
+  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(gauge); else addEventListener('load',gauge);
+
+  try{
+    const saved=localStorage.getItem('yourbrand-display');
+    const card=saved&&CARDS.find(c=>c.dataset.f===saved);
+    apply(card||REF,false);
+  }catch(e){apply(REF,false)}
+})();
+</script>
+<!-- ===== MAGIC COPY ===== -->
+<script>
+/* magic-copy.js — a toggle that swaps every line on a page for its rewritten version.
+ *
+ * Zero dependencies, one file, works on any static page.
+ *
+ *   MagicCopy.init({
+ *     variants: {
+ *       '.hero h1':      'Everyone uses AI. Almost nobody is good at it.',
+ *       '.hero .lede':   { html: 'Five minutes a day. <b>Real</b> problems.' },
+ *       '.hero h1@after':{ after: '<p class="lede">A line that only exists in the rewrite.</p>' }
+ *     }
+ *   })
+ *
+ * A key is a CSS selector. Anything after '@' is ignored, so you can register two
+ * different operations against the same element. Value forms:
+ *
+ *   'string'          replace textContent
+ *   { text }          same, explicit
+ *   { html }          replace innerHTML
+ *   { attr: {…} }     set attributes (aria-label, title, alt, placeholder …)
+ *   { after }         insert HTML after the element; removed again on toggle off
+ *
+ * Originals are captured lazily on first swap, so toggling back is exact — the tool
+ * never needs to know what the page said before it loaded.
+ */
+(function (root) {
+  'use strict';
+
+  var DEFAULTS = {
+    variants: {},
+    label: 'Magic copy',
+    labelOn: 'Original copy',
+    hint: 'Rewrite every line on this page',
+    accent: '#E2643C',
+    ink: '#1E2D4D',
+    paper: '#FBF7EF',
+    position: 'bottom-right',   // bottom-right | bottom-left | bottom-center
+    stagger: 45,                // ms between elements, top of page first
+    hotkey: 'm',                // with Alt
+    remember: true,             // survive a reload within the tab
+    mount: document.body,
+    button: true                // false = no UI, drive it with MagicCopy.toggle()
+  };
+
+  var CSS = [
+    '.mc-btn{position:fixed;z-index:9999;display:inline-flex;align-items:center;gap:9px;',
+    'border:0;cursor:pointer;font:800 14px/1 var(--mc-font,inherit);letter-spacing:.2px;',
+    'padding:14px 20px;border-radius:999px;color:#fff;background:var(--mc-accent);',
+    'box-shadow:0 4px 0 var(--mc-shade),0 10px 26px rgba(30,45,77,.22);',
+    'transition:transform .16s cubic-bezier(.2,.8,.2,1),box-shadow .16s,filter .16s}',
+    '.mc-btn:hover{filter:brightness(1.06);transform:translateY(-2px);',
+    'box-shadow:0 6px 0 var(--mc-shade),0 14px 30px rgba(30,45,77,.26)}',
+    '.mc-btn:active{transform:translateY(4px);box-shadow:0 0 0 var(--mc-shade);transition-duration:0s}',
+    '.mc-btn:focus-visible{outline:3px solid var(--mc-ink);outline-offset:3px}',
+    '.mc-btn[aria-pressed="true"]{background:var(--mc-ink);--mc-shade:rgba(0,0,0,.35)}',
+    '.mc-btn .mc-spark{width:17px;height:17px;flex:none}',
+    '.mc-btn .mc-spark path{transform-origin:12px 12px}',
+    '.mc-btn[aria-pressed="true"] .mc-spark{animation:mc-spin 9s linear infinite}',
+    '@keyframes mc-spin{to{rotate:360deg}}',
+    '.mc-hint{position:fixed;z-index:9998;font:700 12px/1.4 var(--mc-font,inherit);',
+    'color:var(--mc-ink);background:var(--mc-paper);border:2px solid var(--mc-ink);',
+    'padding:7px 11px;border-radius:10px;opacity:0;translate:0 6px;pointer-events:none;',
+    'transition:opacity .2s,translate .2s;box-shadow:0 3px 0 rgba(30,45,77,.18)}',
+    '.mc-btn:hover+.mc-hint,.mc-btn:focus-visible+.mc-hint{opacity:1;translate:0 0}',
+    '.mc-swap{transition:opacity .22s ease,filter .22s ease,translate .22s ease}',
+    '.mc-swap-out{opacity:0;filter:blur(3px);translate:0 -5px}',
+    '.mc-swap-in{opacity:0;filter:blur(3px);translate:0 5px}',
+    '.mc-added{animation:mc-drop .34s cubic-bezier(.2,.8,.2,1) both}',
+    '@keyframes mc-drop{from{opacity:0;translate:0 -8px}to{opacity:1;translate:0 0}}',
+    '@media(prefers-reduced-motion:reduce){',
+    '.mc-swap,.mc-btn,.mc-hint{transition-duration:.01ms!important}',
+    '.mc-added,.mc-btn[aria-pressed="true"] .mc-spark{animation:none!important}}'
+  ].join('');
+
+  var SPARK = '<svg class="mc-spark" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">' +
+    '<path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5l-1.9-5.6L4.5 9l5.6-1.4L12 2z"/>' +
+    '<path d="M18.5 15l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" opacity=".65"/></svg>';
+
+  function el(html) {
+    var d = document.createElement('div');
+    d.innerHTML = html.trim();
+    return d.firstElementChild;
+  }
+
+  function MagicCopy() {
+    this.on = false;
+    this.entries = [];
+    this.opts = null;
+  }
+
+  MagicCopy.prototype.init = function (options) {
+    var o = this.opts = Object.assign({}, DEFAULTS, options || {});
+
+    var style = document.createElement('style');
+    style.textContent = CSS;
+    document.head.appendChild(style);
+
+    // Resolve every selector once. A selector matching nothing is a silent no-op in
+    // production but loud in the console, because a typo'd selector is the whole bug.
+    var self = this;
+    Object.keys(o.variants).forEach(function (key) {
+      var sel = key.split('@')[0].trim();
+      var nodes = document.querySelectorAll(sel);
+      if (!nodes.length) {
+        console.warn('[magic-copy] selector matched nothing:', sel);
+        return;
+      }
+      var spec = o.variants[key];
+      if (typeof spec === 'string') spec = { text: spec };
+      nodes.forEach(function (node) {
+        self.entries.push({ node: node, spec: spec, original: null, added: null });
+      });
+    });
+
+    // Top of the document first, so the rewrite reads as a wave down the page.
+    this.entries.sort(function (a, b) {
+      var pos = a.node.compareDocumentPosition(b.node);
+      return (pos & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+    });
+
+    if (o.button) this._mountButton();
+
+    if (o.hotkey) {
+      document.addEventListener('keydown', function (e) {
+        if (e.altKey && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === o.hotkey) {
+          e.preventDefault();
+          self.toggle();
+        }
+      });
+    }
+
+    if (o.remember && sessionStorage.getItem('magic-copy') === 'on') {
+      this.set(true, { instant: true });
+    }
+    return this;
+  };
+
+  MagicCopy.prototype._mountButton = function () {
+    var o = this.opts, self = this;
+    var side = o.position === 'bottom-left' ? 'left:24px;'
+      : o.position === 'bottom-center' ? 'left:50%;translate:-50% 0;' : 'right:24px;';
+
+    var btn = el('<button class="mc-btn" type="button" aria-pressed="false"></button>');
+    btn.innerHTML = SPARK + '<span class="mc-label"></span>';
+    btn.style.cssText = 'bottom:24px;' + side +
+      '--mc-accent:' + o.accent + ';--mc-ink:' + o.ink + ';--mc-paper:' + o.paper + ';' +
+      '--mc-shade:rgba(0,0,0,.22);';
+
+    var hint = el('<div class="mc-hint"></div>');
+    hint.textContent = o.hint + (o.hotkey ? '  (alt+' + o.hotkey + ')' : '');
+    hint.style.cssText = 'bottom:78px;' + side +
+      '--mc-ink:' + o.ink + ';--mc-paper:' + o.paper + ';';
+
+    var live = el('<div class="mc-live" role="status" aria-live="polite"></div>');
+    live.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)';
+
+    btn.addEventListener('click', function () { self.toggle(); });
+    o.mount.appendChild(btn);
+    o.mount.appendChild(hint);
+    o.mount.appendChild(live);
+
+    this.btn = btn;
+    this.live = live;
+    this.labelEl = btn.querySelector('.mc-label');
+    this._paint();
+  };
+
+  MagicCopy.prototype._paint = function () {
+    if (!this.btn) return;
+    this.btn.setAttribute('aria-pressed', String(this.on));
+    this.labelEl.textContent = this.on ? this.opts.labelOn : this.opts.label;
+    this.live.textContent = this.on
+      ? 'Rewritten copy applied to ' + this.entries.length + ' places on the page.'
+      : 'Original copy restored.';
+  };
+
+  MagicCopy.prototype.toggle = function () { return this.set(!this.on); };
+
+  MagicCopy.prototype.set = function (on, cfg) {
+    cfg = cfg || {};
+    if (on === this.on) return this;
+    this.on = on;
+    var self = this, step = cfg.instant ? 0 : this.opts.stagger;
+    var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    this.entries.forEach(function (e, i) {
+      var delay = (cfg.instant || reduce) ? 0 : i * step;
+      setTimeout(function () { self._apply(e, on, cfg.instant || reduce); }, delay);
+    });
+
+    if (this.opts.remember) sessionStorage.setItem('magic-copy', on ? 'on' : 'off');
+    this._paint();
+    return this;
+  };
+
+  MagicCopy.prototype._apply = function (e, on, instant) {
+    var node = e.node, spec = e.spec;
+
+    // Capture the page as it shipped, once, the first time we touch it.
+    if (e.original === null) {
+      e.original = { html: node.innerHTML, attr: {} };
+      if (spec.attr) Object.keys(spec.attr).forEach(function (k) {
+        e.original.attr[k] = node.getAttribute(k);
+      });
+    }
+
+    var write = function () {
+      if (spec.attr) {
+        Object.keys(spec.attr).forEach(function (k) {
+          var v = on ? spec.attr[k] : e.original.attr[k];
+          if (v === null) node.removeAttribute(k); else node.setAttribute(k, v);
+        });
+      }
+      if (spec.html !== undefined) node.innerHTML = on ? spec.html : e.original.html;
+      else if (spec.text !== undefined) {
+        if (on) node.textContent = spec.text;
+        else node.innerHTML = e.original.html;
+      }
+      if (spec.after !== undefined) {
+        if (on && !e.added) {
+          e.added = el(spec.after);
+          e.added.classList.add('mc-added');
+          node.insertAdjacentElement('afterend', e.added);
+        } else if (!on && e.added) {
+          e.added.remove();
+          e.added = null;
+        }
+      }
+    };
+
+    // Nothing textual changed? Skip the flicker entirely.
+    if (spec.html === undefined && spec.text === undefined) return write();
+
+    if (instant) return write();
+
+    // A rapid double-toggle must not let an older cross-fade finish on top of a newer one.
+    var token = (e.token = (e.token || 0) + 1);
+    var done = function () {
+      if (e.token !== token) return;
+      node.classList.remove('mc-swap', 'mc-swap-out', 'mc-swap-in');
+    };
+
+    node.classList.add('mc-swap', 'mc-swap-out');
+    setTimeout(function () {
+      if (e.token !== token) return;
+      write();
+      node.classList.remove('mc-swap-out');
+      node.classList.add('mc-swap-in');
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          if (e.token === token) node.classList.remove('mc-swap-in');
+        });
+      });
+      // rAF is paused in a background tab, so the two lines above can never run there and
+      // the text would sit at opacity 0 forever. setTimeout is throttled but still fires.
+      // The class also has to come off entirely: .mc-swap animates `translate`, which is
+      // the same property the page's own scroll reveals use.
+      setTimeout(done, 300);
+    }, 220);
+  };
+
+  root.MagicCopy = new MagicCopy();
+})(window);
+
+</script>
+<script>
+/* Yourbrand — the rewritten copy behind the Magic copy button.
+ *
+ * Method: de-slop pass, then Priestley's pitch order applied section by section
+ * (problem + insight -> solution -> proof -> one ask), then the 2026 SaaS bar —
+ * name the pain, show the product, be specific, say exactly what the next click does.
+ *
+ * Nothing here invents a user count, a rating, a testimonial or a result. Yourbrand has
+ * not shipped. The lift comes from specificity, not from borrowed proof.
+ */
+(function () {
+  var site = document.getElementById('view-site');
+  if (!site || !window.MagicCopy) return;
+
+  MagicCopy.init({
+    mount: document.getElementById('view-site'),
+    accent: 'var(--persimmon)', ink: 'var(--ink)', paper: 'var(--paper)',
+    label: 'Magic copy', labelOn: 'Original copy',
+    button: false,                 // the control lives in the Copy tab
+    variants: {
+      // 'selector': 'replacement text'
+      // 'selector': { html: 'replacement <b>markup</b>' }
+      // 'selector@sub': { after: '<p class="lede">an added line</p>' }
+      '.hero-h1': { html: 'TODO the rewritten headline' },
+    }
+  });
+})();
+
+</script>
+<!-- ===== /MAGIC COPY ===== -->
+<!-- ===== COPY VIEW ===== -->
+<script>
+/* The Copy tab's swap wall. Built from the same variants map Claude applies, with the
+   "before" text read off the live DOM — so this documentation cannot drift from the page. */
+(function(){
+  var host=document.getElementById('swap-groups');
+  if(!host||!window.MagicCopy)return;
+
+  function esc(t){var d=document.createElement('div');d.textContent=t;return d.innerHTML}
+  // <br> vanishes in textContent, which would render "AI.Almost" in the wall.
+  function txt(html){var d=document.createElement('div');d.innerHTML=String(html).replace(/<br\s*\/?>/gi,' ');return d.textContent.replace(/ /g,' ').replace(/\s+/g,' ').trim()}
+  function where(node){
+    var s=node.closest('[data-sec]');
+    if(s)return s.getAttribute('data-sec');
+    var map=[['.nav','nav'],['.hero','hero'],['.sky','sky'],['.super','pro'],['.final','close'],['.footer','footer']];
+    for(var i=0;i<map.length;i++)if(node.closest(map[i][0]))return map[i][1];
+    return 'page';
+  }
+
+  /* One chip per band of the site, in page order. nav rides with the hero,
+     the footer rides with the close — same as they read when scrolling. */
+  var ICONS={
+    flag:'<path d="M6 3v18M6 5h12l-3 4 3 4H6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+    blocks:'<rect x="4" y="4" width="7" height="7" rx="2" fill="currentColor"/><rect x="13" y="4" width="7" height="7" rx="2" fill="currentColor" opacity=".55"/><rect x="4" y="13" width="7" height="7" rx="2" fill="currentColor" opacity=".55"/><rect x="13" y="13" width="7" height="7" rx="2" fill="currentColor"/>',
+    flask:'<path d="M10 3h4M11 3v6l-6 9.5A2 2 0 006.7 21h10.6a2 2 0 001.7-2.5L13 9V3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10.5" cy="16" r="1.4" fill="currentColor"/><circle cx="14" cy="13" r="1" fill="currentColor"/>',
+    flame:'<path d="M12 2c1 4-3 5-3 9a5 5 0 0010 0c0-2-1-3.5-2-5-.5 1.5-1.5 2-2.5 2C15.5 6 14 4 12 2z" fill="currentColor"/>',
+    path:'<path d="M4 19c6 0 6-9 11-9 4 0 3.5 5 8 4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M19 10l4 3.6-5 2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+    phone:'<rect x="7" y="2.5" width="10" height="19" rx="2.6" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="12" cy="17.6" r="1.3" fill="currentColor"/>',
+    crown:'<path d="M4 17l1.6-8.5L10 12l2-6.5L14 12l4.4-3.5L20 17H4z" fill="currentColor"/>',
+    folder:'<path d="M3.5 7a2 2 0 012-2h4l2 2.5h7a2 2 0 012 2V17a2 2 0 01-2 2h-13a2 2 0 01-2-2V7z" fill="currentColor"/>',
+    star:'<path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7l3-7z" fill="currentColor"/>'
+  };
+  var GROUPS=[
+    {keys:['nav','hero'],   title:'The hero',      icon:'flag',   c:'var(--persimmon)'},
+    {keys:['how'],          title:'How it works',  icon:'blocks', c:'var(--aizome)'},
+    {keys:['method'],       title:'The method',    icon:'flask',  c:'var(--moss)'},
+    {keys:['habit'],        title:'The habit',     icon:'flame',  c:'var(--madder)'},
+    {keys:['path'],         title:'Your path',     icon:'path',   c:'var(--ochre)'},
+    {keys:['sky'],          title:'The sky band',  icon:'phone',  c:'var(--slate-text)'},
+    {keys:['pro'],          title:'Your Pro tier',     icon:'crown',  c:'var(--aizome)'},
+    {keys:['portfolio'],    title:'The portfolio', icon:'folder', c:'var(--moss)'},
+    {keys:['close','footer'],title:'The close',    icon:'star',   c:'var(--persimmon)'}
+  ];
+
+  var buckets={}, total=0;
+  MagicCopy.entries.forEach(function(e){
+    var sp=e.spec, after, isNew=false;
+    if(sp.html!==undefined)after=txt(sp.html);
+    else if(sp.text!==undefined)after=sp.text;
+    else if(sp.after!==undefined){after=txt(sp.after);isNew=true}
+    else return;                       // attribute-only entries have nothing to show
+    var w=where(e.node);
+    (buckets[w]=buckets[w]||[]).push({
+      after:after,
+      before:isNew?null:txt((MagicCopy.on&&e.original)?e.original.html:e.node.innerHTML)
+    });
+    total++;
+  });
+
+  var frag=document.createDocumentFragment();
+  GROUPS.forEach(function(g){
+    var rows=[];
+    g.keys.forEach(function(k){rows=rows.concat(buckets[k]||[])});
+    if(!rows.length)return;
+    var card=document.createElement('div');
+    card.className='sg';
+    var body=rows.map(function(r){
+      return '<div class="cw">'+
+        (r.before===null
+          ?'<i class="cw-new">new line</i>'
+          :'<s>'+esc(r.before)+'</s>')+
+        '<p>'+esc(r.after)+'</p></div>';
+    }).join('');
+    card.innerHTML='<div class="sg-head" style="--c:'+g.c+'">'+
+      '<span class="sg-ic"><svg viewBox="0 0 24 24" aria-hidden="true">'+ICONS[g.icon]+'</svg></span>'+
+      '<b>'+g.title+'</b><em>'+rows.length+(rows.length===1?' line':' lines')+'</em></div>'+body;
+    frag.appendChild(card);
+  });
+  host.appendChild(frag);
+  var c=document.getElementById('swap-count');
+  if(c)c.textContent='all '+total+' lines';
+})();
+
+/* The Copy tab owns the magic-copy control. The engine mounts with button:false,
+   so without this the toggle has no reachable trigger anywhere on the page. */
+(function(){
+  var b=document.getElementById('copy-toggle');
+  if(!b||!window.MagicCopy)return;
+  b.addEventListener('click',function(){
+    MagicCopy.toggle();
+    var on=MagicCopy.on;
+    b.textContent=on?'Restore original copy':'Activate magic copy';
+    b.setAttribute('aria-pressed',String(on));
+  });
+})();
+</script>
+<!-- ===== /COPY VIEW ===== -->
+</body>
+</html>

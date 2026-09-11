@@ -1871,6 +1871,17 @@ function ChatPane({
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  useEffect(() => {
+    if (paneIndex !== 0) return;
+    try {
+      const draft = sessionStorage.getItem("website-os.agent-request.v1");
+      if (draft && draft.length <= 12000) {
+        setInput(draft);
+        sessionStorage.removeItem("website-os.agent-request.v1");
+      }
+    } catch { /* The normal composer works without storage. */ }
+  }, [paneIndex]);
+
   const [sending, setSending] = useState(false);
   const [activity, setActivity] = useState<string>("");
   const [loadingSession, setLoadingSession] = useState(false);

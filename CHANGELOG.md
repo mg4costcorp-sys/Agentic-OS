@@ -5,6 +5,14 @@ versions are kept as zipped artefacts locally for rollback.
 
 ---
 
+## V3.5 - 10 Sep 2026
+
+The community edition of Agentic OS includes Website OS in the sidebar. Connect your running localhost website, preview desktop, tablet and mobile layouts, and open the editor full screen. Source editing is connected through the guided agent setup.
+
+Generation identifies its provider and model before use. Personal example websites, footage, account data and history are excluded from the download.
+
+---
+
 ## V3.0 — 26 Jul 2026
 
 The **never-dead-end** release — turns that resume themselves, and a chat

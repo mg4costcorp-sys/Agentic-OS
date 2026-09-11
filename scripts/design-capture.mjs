@@ -80,12 +80,19 @@ function candidates(toolName, toolInput, cwd) {
     const cmd = typeof toolInput?.command === "string" ? toolInput.command : "";
     // Pull path-shaped tokens ending in a media extension. Quoted or bare;
     // ~, absolute, or relative to the session cwd.
-    const re = /(["']?)((?:~|\.{0,2})?[\w./\\ -]*?\.(?:png|jpe?g|webp|gif|avif|svg|mp4|mov|webm|m4v))\1/gi;
+    const re =
+      /(["']?)((?:~|[A-Za-z]:|\.{0,2})?[\w./\\ -]*?\.(?:png|jpe?g|webp|gif|avif|svg|mp4|mov|webm|m4v))\1/gi;
     let m;
     while ((m = re.exec(cmd)) !== null) {
       let p = m[2].trim();
       if (!p || p.includes("*")) continue;
       if (p.startsWith("~")) p = join(homedir(), p.slice(1));
+      // Claude Code's Bash tool runs under Git Bash on Windows, so paths
+      // arrive as /c/Users/… — resolve() would turn that into C:\c\Users\…
+      if (process.platform === "win32") {
+        const drive = /^\/([A-Za-z])\/(.*)$/.exec(p);
+        if (drive) p = `${drive[1].toUpperCase()}:\\${drive[2].replace(/\//g, "\\")}`;
+      }
       out.push(isAbsolute(p) ? p : resolve(cwd || process.cwd(), p));
     }
   }

@@ -1,7 +1,9 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   BrainCircuit,
+  Globe2,
   Home,
+  Landmark,
   LayoutDashboard,
   Palette,
   Settings as SettingsIcon,
@@ -240,6 +242,70 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
             style={{
               color: "#f0abfc",
               border: "1px solid rgba(240,171,252,0.35)",
+            }}
+          >
+            Beta
+          </span>
+        </Link>
+        <Link
+          to="/business"
+          onClick={onNavigate}
+          className={cn(
+            "relative flex items-center gap-3 rounded-md px-2.5 py-2 text-[13px] transition-colors",
+            isActive("/business")
+              ? "bg-emerald-500/[0.09] font-medium text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          )}
+        >
+          {isActive("/business") && (
+            <span
+              aria-hidden
+              className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-r-full"
+              style={{
+                background: "linear-gradient(180deg, #6ee7b7, #199e70)",
+                boxShadow: "0 0 10px rgba(25, 158, 112, 0.7)",
+              }}
+            />
+          )}
+          <Landmark className="h-4 w-4 shrink-0" />
+          <span className="flex-1">Business</span>
+          <span
+            className="text-[8px] uppercase tracking-[0.14em] px-1.5 py-0.5 rounded"
+            style={{
+              color: "#6ee7b7",
+              border: "1px solid rgba(110,231,183,0.35)",
+            }}
+          >
+            Beta
+          </span>
+        </Link>
+        <Link
+          to="/websites"
+          onClick={onNavigate}
+          className={cn(
+            "relative flex items-center gap-3 rounded-md px-2.5 py-2 text-[13px] transition-colors",
+            isActive("/websites")
+              ? "bg-amber-500/[0.09] font-medium text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          )}
+        >
+          {isActive("/websites") && (
+            <span
+              aria-hidden
+              className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-r-full"
+              style={{
+                background: "linear-gradient(180deg, #fcd34d, #d0a215)",
+                boxShadow: "0 0 10px rgba(208, 162, 21, 0.7)",
+              }}
+            />
+          )}
+          <Globe2 className="h-4 w-4 shrink-0" />
+          <span className="flex-1">Website OS</span>
+          <span
+            className="text-[8px] uppercase tracking-[0.14em] px-1.5 py-0.5 rounded"
+            style={{
+              color: "#fcd34d",
+              border: "1px solid rgba(252,211,77,0.35)",
             }}
           >
             Beta

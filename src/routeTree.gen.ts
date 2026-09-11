@@ -9,6 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WebsitesRouteImport } from './routes/websites'
+import { Route as TransitionsRouteImport } from './routes/transitions'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as SetupRouteImport } from './routes/setup'
@@ -17,6 +19,7 @@ import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as DesignRouteImport } from './routes/design'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CodegraphRouteImport } from './routes/codegraph'
+import { Route as BusinessRouteImport } from './routes/business'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesIndexRouteImport } from './routes/workspaces.index'
@@ -25,6 +28,16 @@ import { Route as AgentsOpenclawRouteImport } from './routes/agents.openclaw'
 import { Route as AgentsHermesRouteImport } from './routes/agents.hermes'
 import { Route as AgentsClaudeCodeRouteImport } from './routes/agents.claude-code'
 
+const WebsitesRoute = WebsitesRouteImport.update({
+  id: '/websites',
+  path: '/websites',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransitionsRoute = TransitionsRouteImport.update({
+  id: '/transitions',
+  path: '/transitions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SkillsRoute = SkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
@@ -63,6 +76,11 @@ const DashboardRoute = DashboardRouteImport.update({
 const CodegraphRoute = CodegraphRouteImport.update({
   id: '/codegraph',
   path: '/codegraph',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BusinessRoute = BusinessRouteImport.update({
+  id: '/business',
+  path: '/business',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ActivityRoute = ActivityRouteImport.update({
@@ -104,6 +122,7 @@ const AgentsClaudeCodeRoute = AgentsClaudeCodeRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/business': typeof BusinessRoute
   '/codegraph': typeof CodegraphRoute
   '/dashboard': typeof DashboardRoute
   '/design': typeof DesignRoute
@@ -112,6 +131,8 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/share': typeof ShareRoute
   '/skills': typeof SkillsRoute
+  '/transitions': typeof TransitionsRoute
+  '/websites': typeof WebsitesRoute
   '/agents/claude-code': typeof AgentsClaudeCodeRoute
   '/agents/hermes': typeof AgentsHermesRoute
   '/agents/openclaw': typeof AgentsOpenclawRoute
@@ -121,6 +142,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/business': typeof BusinessRoute
   '/codegraph': typeof CodegraphRoute
   '/dashboard': typeof DashboardRoute
   '/design': typeof DesignRoute
@@ -129,6 +151,8 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/share': typeof ShareRoute
   '/skills': typeof SkillsRoute
+  '/transitions': typeof TransitionsRoute
+  '/websites': typeof WebsitesRoute
   '/agents/claude-code': typeof AgentsClaudeCodeRoute
   '/agents/hermes': typeof AgentsHermesRoute
   '/agents/openclaw': typeof AgentsOpenclawRoute
@@ -139,6 +163,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/business': typeof BusinessRoute
   '/codegraph': typeof CodegraphRoute
   '/dashboard': typeof DashboardRoute
   '/design': typeof DesignRoute
@@ -147,6 +172,8 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/share': typeof ShareRoute
   '/skills': typeof SkillsRoute
+  '/transitions': typeof TransitionsRoute
+  '/websites': typeof WebsitesRoute
   '/agents/claude-code': typeof AgentsClaudeCodeRoute
   '/agents/hermes': typeof AgentsHermesRoute
   '/agents/openclaw': typeof AgentsOpenclawRoute
@@ -158,6 +185,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/activity'
+    | '/business'
     | '/codegraph'
     | '/dashboard'
     | '/design'
@@ -166,6 +194,8 @@ export interface FileRouteTypes {
     | '/setup'
     | '/share'
     | '/skills'
+    | '/transitions'
+    | '/websites'
     | '/agents/claude-code'
     | '/agents/hermes'
     | '/agents/openclaw'
@@ -175,6 +205,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/activity'
+    | '/business'
     | '/codegraph'
     | '/dashboard'
     | '/design'
@@ -183,6 +214,8 @@ export interface FileRouteTypes {
     | '/setup'
     | '/share'
     | '/skills'
+    | '/transitions'
+    | '/websites'
     | '/agents/claude-code'
     | '/agents/hermes'
     | '/agents/openclaw'
@@ -192,6 +225,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/activity'
+    | '/business'
     | '/codegraph'
     | '/dashboard'
     | '/design'
@@ -200,6 +234,8 @@ export interface FileRouteTypes {
     | '/setup'
     | '/share'
     | '/skills'
+    | '/transitions'
+    | '/websites'
     | '/agents/claude-code'
     | '/agents/hermes'
     | '/agents/openclaw'
@@ -210,6 +246,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivityRoute: typeof ActivityRoute
+  BusinessRoute: typeof BusinessRoute
   CodegraphRoute: typeof CodegraphRoute
   DashboardRoute: typeof DashboardRoute
   DesignRoute: typeof DesignRoute
@@ -218,6 +255,8 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   ShareRoute: typeof ShareRoute
   SkillsRoute: typeof SkillsRoute
+  TransitionsRoute: typeof TransitionsRoute
+  WebsitesRoute: typeof WebsitesRoute
   AgentsClaudeCodeRoute: typeof AgentsClaudeCodeRoute
   AgentsHermesRoute: typeof AgentsHermesRoute
   AgentsOpenclawRoute: typeof AgentsOpenclawRoute
@@ -227,6 +266,20 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/websites': {
+      id: '/websites'
+      path: '/websites'
+      fullPath: '/websites'
+      preLoaderRoute: typeof WebsitesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transitions': {
+      id: '/transitions'
+      path: '/transitions'
+      fullPath: '/transitions'
+      preLoaderRoute: typeof TransitionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/skills': {
       id: '/skills'
       path: '/skills'
@@ -281,6 +334,13 @@ declare module '@tanstack/react-router' {
       path: '/codegraph'
       fullPath: '/codegraph'
       preLoaderRoute: typeof CodegraphRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/business': {
+      id: '/business'
+      path: '/business'
+      fullPath: '/business'
+      preLoaderRoute: typeof BusinessRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/activity': {
@@ -338,6 +398,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
+  BusinessRoute: BusinessRoute,
   CodegraphRoute: CodegraphRoute,
   DashboardRoute: DashboardRoute,
   DesignRoute: DesignRoute,
@@ -346,6 +407,8 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   ShareRoute: ShareRoute,
   SkillsRoute: SkillsRoute,
+  TransitionsRoute: TransitionsRoute,
+  WebsitesRoute: WebsitesRoute,
   AgentsClaudeCodeRoute: AgentsClaudeCodeRoute,
   AgentsHermesRoute: AgentsHermesRoute,
   AgentsOpenclawRoute: AgentsOpenclawRoute,

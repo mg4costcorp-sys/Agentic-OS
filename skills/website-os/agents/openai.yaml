@@ -1,0 +1,4 @@
+interface:
+  display_name: "Website OS"
+  short_description: "Build four website systems, then edit them in chat"
+  default_prompt: "Use $website-os to build my website with its design system, graphics and copy, then make it editable through this conversation."

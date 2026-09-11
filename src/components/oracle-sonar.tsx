@@ -203,7 +203,7 @@ export function OracleSonar({
       // Guard against tab-switch hitches producing huge dt jumps.
       if (dt > 0.05) dt = 0.05;
 
-      // Ease the incoming level — Jack hates spasming.
+      // Ease the incoming level — keep movement smooth.
       const target = levelRef.current;
       smoothed += (target - smoothed) * 0.06;
       // A floor of ambient life so it breathes even at level 0.

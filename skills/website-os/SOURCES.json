@@ -1,0 +1,33 @@
+{
+  "name": "Website OS",
+  "version": "1.0.0",
+  "sources": {
+    "four-systems": {
+      "archive": "four-systems (1).zip",
+      "sha256": "86b2cec4adc65010ed5152f4222c5b6a9de13983fb13fc7a9e52eaa62d8527ea"
+    },
+    "claude-cms": {
+      "archive": "claude-cms.zip",
+      "sha256": "a99c9520f53c527a4b8fac356c6242d44b2592d040646ad1191e3dc04b3b5304",
+      "integration": "Content model, validation, draft previews and version history adapted for an in-chat planner. Original hosted CMS not bundled."
+    },
+    "slopmonster": {
+      "repository": "https://github.com/ItsssssJack/SlopMonster",
+      "ref": "main",
+      "commit": "f261dbf11c2a206ecd8780c070a46dae64edd8be",
+      "verified_at": "2026-09-10",
+      "files": {
+        "LICENSE": "c0f18cfb62c0745fc89316fd691678f594dcf06b9a018ee2c78a5f202e214ab0",
+        "UPSTREAM-SKILL.md": "494c528c1df66e1472aeb3ff26695d79f062596600b02c28c3338d881f74d405",
+        "prompts/cleanse.txt": "6d1423dbe0e43e9e001ec55e8c179d008e89ddfa80d93efebf82bb9e5901c0e7",
+        "references/principles.md": "90003abf6a7a2dfb3d4b291ea878a9140dd699add81c1a1f6c6313106a006299",
+        "references/signs-of-ai-writing.md": "7cffd699ee993a35b26b8a77a1359db928fc79f4d740357fed5340c9a0361636",
+        "references/sources.md": "2a8fc038e74d5080dfc0b12cd5881822ff739492120514f64276845e4b5dd4db",
+        "tools/cleanse.sh": "6d26e9d8f4d80af640dd0485b63efe83edd87e62815c001d5e0f5d36cf82fe37",
+        "tools/deslop.py": "d31fd8c9b7013bd857c38afa53b59aa734a9cf96e5026ff69921e43537a9fd5a",
+        "tools/test_cleanse.sh": "2dd4540d6e11eedf211a8f16ff1ebaf60d2597d0a326379defd01f6a82c9fe6b",
+        "tools/test_deslop.py": "b54be86a87ece908ea9b4ca9a79b15f034bcb083a2d2f4d775a25c855fd12733"
+      }
+    }
+  }
+}

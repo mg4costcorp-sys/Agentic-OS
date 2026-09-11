@@ -179,7 +179,7 @@ export function OraclePlasma({
 
       // --- ease inputs ---
       const target = Math.max(0, Math.min(1, levelRef.current));
-      smoothed += (target - smoothed) * 0.14;  // snappier — react quickly as Jack talks
+      smoothed += (target - smoothed) * 0.14;  // snappier — react quickly to speech
       const lvl = smoothed;
 
       const accent = hexToRgb(colorRef.current);

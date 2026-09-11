@@ -248,6 +248,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .design-spectrum-frame,
+  .design-spectrum-live,
   .design-render-field,
   .design-render-lobe,
   .design-render-gleam,
@@ -260,6 +261,25 @@
   .design-render-sheen {
     opacity: 0;
   }
+}
+
+
+/* Composer frame once a prompt is ready to fire: the spectrum breathes.
+   Idle drift says "alive"; the pulse says "armed". */
+@keyframes design-spectrum-pulse {
+  0%,
+  100% {
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    filter: saturate(1.45) brightness(1.22);
+  }
+}
+
+.design-spectrum-live {
+  animation:
+    design-spectrum-drift 16s ease-in-out infinite,
+    design-spectrum-pulse 2.4s ease-in-out infinite;
 }
 
 @custom-variant dark (&:is(.dark *));
@@ -1009,3 +1029,12 @@ button.focus-orange:focus {
     opacity: 1;
   }
 }
+
+/* Website OS community connection surface. */
+.wos-c-grid { background-image: radial-gradient(#c7cdb754 0.7px, transparent 0.7px); background-size: 11px 11px; }
+.wos-c-button { display:inline-flex; align-items:center; gap:7px; border:1px solid #d6dccb; border-radius:7px; padding:7px 11px; background:#ffffffe0; color:#65744f; font-size:11px; transition:background .15s; }
+.wos-c-button:hover { background:#f1f5e9; }
+.wos-c-primary { display:inline-flex; align-items:center; gap:8px; border-radius:7px; padding:12px 16px; background:#30372b; color:#f8faf1; font-size:11px; transition:background .15s; }
+.wos-c-primary:hover { background:#4c583f; }
+.wos-c-primary:disabled { opacity:.55; cursor:wait; }
+.wos-c-button:focus-visible,.wos-c-primary:focus-visible { outline:2px solid #81965e; outline-offset:3px; }
