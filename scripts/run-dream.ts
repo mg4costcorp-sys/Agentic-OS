@@ -99,6 +99,36 @@ function openRouterKey(): string {
   return "";
 }
 
+// codex/openrouter get the WHOLE live-data.json inlined as literal prompt text
+// (unlike claude/hermes, which are agentic and read files themselves) — but
+// live-data.json also carries memory.nodes/memory.links, the raw force-graph
+// render data for the dashboard's Memory Graph view (thousands of nodes/edges,
+// megabytes, zero use to a text prescription). Left in, this alone pushed one
+// real run to 6.58M characters against codex's 1,048,576-char `exec` input cap
+// (measured 2026-09-11) — the run failed outright, on every future day, for
+// any operator whose memory graph is non-trivial. Strip it here; keep
+// memory.stats/obsidianVaults/knowledge/recentlyUpdated/staleFiles, which are
+// the parts Dream's prescriptions actually reference.
+function trimLiveDataForPrompt(raw: string): string {
+  try {
+    const data = JSON.parse(raw);
+    if (data?.memory && typeof data.memory === "object") {
+      const { nodes, links, ...rest } = data.memory;
+      data.memory = {
+        ...rest,
+        nodeCount: Array.isArray(nodes) ? nodes.length : 0,
+        linkCount: Array.isArray(links) ? links.length : 0,
+      };
+    }
+    return JSON.stringify(data);
+  } catch {
+    // Malformed live-data.json shouldn't crash the whole Dream run — fall
+    // back to the raw text and let the engine (or the JSON parse downstream)
+    // surface the real problem.
+    return raw;
+  }
+}
+
 function assemblePrompt(): { system: string; user: string } {
   const skillPath = [
     join(HOME, ".claude", "skills", "dream", "SKILL.md"),
@@ -108,7 +138,7 @@ function assemblePrompt(): { system: string; user: string } {
   if (!skillPath) throw new Error("Dream SKILL.md not found in any standard location");
   const skill = readFileSync(skillPath, "utf-8");
   const liveDataPath = join(REPO, "src", "data", "live-data.json");
-  const live = existsSync(liveDataPath) ? readFileSync(liveDataPath, "utf-8") : "{}";
+  const live = existsSync(liveDataPath) ? trimLiveDataForPrompt(readFileSync(liveDataPath, "utf-8")) : "{}";
   const system = [
     skill,
     "",
@@ -142,9 +172,21 @@ function writeDream(dream: any): void {
   writeFileSync(join(DREAMS_DIR, `dream-${today}.json`), JSON.stringify(dream, null, 2), { mode: 0o644 });
 }
 
+// An agentic /dream run reads 24h of activity across the whole stack before it
+// writes a single prescription — the 240s budget killed it mid-thought every
+// single time (49 consecutive SIGTERMs in dream-cron.log, 2026-07 → 2026-09,
+// every one reported as an auth error by the hardcoded message below). The
+// cron fires once a day and nothing waits on it, so the wall-clock cost of a
+// generous ceiling is zero; the cost of a tight one was 49 dark days.
+const AGENTIC_TIMEOUT_MS = 1_200_000; // 20 min
+
 function runAgenticCli(bin: string, args: string[], label: string): number {
   console.log(`[run-dream] ${label}: launching ${bin}`);
-  const r = spawnSync(bin, args, { stdio: "inherit", timeout: 240_000 });
+  const r = spawnSync(bin, args, { stdio: "inherit", timeout: AGENTIC_TIMEOUT_MS });
+  if (r.signal === "SIGTERM")
+    console.error(
+      `[run-dream] ${label} was killed after ${AGENTIC_TIMEOUT_MS / 1000}s — this is a TIMEOUT, not an auth failure.`,
+    );
   return r.status ?? 1;
 }
 
@@ -168,7 +210,7 @@ function runCodex(bin: string): void {
         "--output-last-message",
         outFile,
       ],
-      { input: prompt, encoding: "utf-8", timeout: 240_000, maxBuffer: 64 * 1024 * 1024 },
+      { input: prompt, encoding: "utf-8", timeout: AGENTIC_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
     );
     if (!existsSync(outFile)) {
       throw new Error(`codex produced no output (exit ${r.status}). ${(r.stderr || "").slice(-300)}`.trim());
@@ -250,8 +292,16 @@ async function main(): Promise<void> {
         ["-p", "/dream", "--add-dir", STATE_DIR, "--permission-mode", "acceptEdits"],
         "claude",
       );
+      // Was: one hardcoded "needs setup-token" string for EVERY non-zero exit.
+      // That sentence sent the reader after an auth problem 49 times running
+      // while the real cause was the timeout above — name only what the exit
+      // code actually tells us, and admit when it tells us nothing.
       if (code !== 0)
-        throw new Error(`claude exited ${code} — headless needs 'claude setup-token' or ANTHROPIC_API_KEY`);
+        throw new Error(
+          code === 143
+            ? `claude was killed (exit 143) — it ran past the ${AGENTIC_TIMEOUT_MS / 1000}s budget. Not an auth problem.`
+            : `claude exited ${code}. If the output above says the OAuth token was revoked, run 'claude setup-token' (or set ANTHROPIC_API_KEY); otherwise read that output — this exit code alone does not name the cause.`,
+        );
     } else if (engine === "codex") {
       if (!have.codex) throw new Error("codex not installed");
       runCodex(have.codex);
