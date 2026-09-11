@@ -24,5 +24,262 @@
         "degree": 12
       }
     ]
+  },
+  {
+    "id": "picbois-hyso",
+    "name": "Picbois",
+    "description": "Cloned & graphed from a Git URL",
+    "path": "git:Picbois",
+    "graphPath": "/Users/matthieugariepy/Agentic-OS/src/data/graphs/picbois-hyso.json",
+    "lang": "Code",
+    "color": "#a78bfa",
+    "nodeCount": 1553,
+    "edgeCount": 3056,
+    "communities": 125,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "cn()",
+        "degree": 104
+      },
+      {
+        "name": "PICBOIS_CONSTITUTION_TECHNIQUE_LOI25_CLOUDFLARE.md",
+        "degree": 100
+      },
+      {
+        "name": "route.ts",
+        "degree": 81
+      },
+      {
+        "name": "types.ts",
+        "degree": 71
+      },
+      {
+        "name": "createClient",
+        "degree": 63
+      },
+      {
+        "name": "board.tsx",
+        "degree": 61
+      }
+    ]
+  },
+  {
+    "id": "picbois47",
+    "name": "picbois47",
+    "description": "Cloned & graphed from a Git URL",
+    "path": "git:picbois47",
+    "graphPath": "/Users/matthieugariepy/Agentic-OS/src/data/graphs/picbois47.json",
+    "lang": "Code",
+    "color": "#f5b14c",
+    "nodeCount": 427,
+    "edgeCount": 412,
+    "communities": 21,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "Brief factuel — Picbois47",
+        "degree": 20
+      },
+      {
+        "name": "Sequence — Style Reference",
+        "degree": 16
+      },
+      {
+        "name": "DOSSIER MAÎTRE — PICBOIS47 · v2",
+        "degree": 15
+      },
+      {
+        "name": "DOSSIER MAÎTRE — SITE WEB PICBOIS47",
+        "degree": 14
+      },
+      {
+        "name": "N8n — Style Reference",
+        "degree": 14
+      },
+      {
+        "name": "Components",
+        "degree": 14
+      }
+    ]
+  },
+  {
+    "id": "agentic-os",
+    "name": "Agentic-OS",
+    "description": "Cloned & graphed from a Git URL",
+    "path": "git:Agentic-OS",
+    "graphPath": "/Users/matthieugariepy/Agentic-OS/src/data/graphs/agentic-os.json",
+    "lang": "TypeScript",
+    "color": "#f472b6",
+    "nodeCount": 2291,
+    "edgeCount": 3234,
+    "communities": 151,
+    "extractedPct": 99,
+    "godNodes": [
+      {
+        "name": "agents.hermes.tsx",
+        "degree": 231
+      },
+      {
+        "name": "aggregate.ts",
+        "degree": 106
+      },
+      {
+        "name": "home-command.tsx",
+        "degree": 101
+      },
+      {
+        "name": "cn()",
+        "degree": 90
+      },
+      {
+        "name": "dashboard.tsx",
+        "degree": 90
+      },
+      {
+        "name": "design.tsx",
+        "degree": 81
+      }
+    ]
+  },
+  {
+    "id": "intelligencecapital-homepage",
+    "name": "intelligencecapital-homepage",
+    "description": "Cloned & graphed from a Git URL",
+    "path": "git:intelligencecapital-homepage",
+    "graphPath": "/Users/matthieugariepy/Agentic-OS/src/data/graphs/intelligencecapital-homepage.json",
+    "lang": "Code",
+    "color": "#7be0c8",
+    "nodeCount": 2,
+    "edgeCount": 1,
+    "communities": 1,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "vercel.json",
+        "degree": 1
+      },
+      {
+        "name": "rewrites",
+        "degree": 1
+      }
+    ]
+  },
+  {
+    "id": "landing-page-intelligence-capital",
+    "name": "Landing-page-Intelligence-Capital",
+    "description": "Cloned & graphed from a Git URL",
+    "path": "git:Landing-page-Intelligence-Capital",
+    "graphPath": "/Users/matthieugariepy/Agentic-OS/src/data/graphs/landing-page-intelligence-capital.json",
+    "lang": "TypeScript",
+    "color": "#22d3ee",
+    "nodeCount": 655,
+    "edgeCount": 1072,
+    "communities": 46,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "cn()",
+        "degree": 138
+      },
+      {
+        "name": "dependencies",
+        "degree": 64
+      },
+      {
+        "name": "utils.ts",
+        "degree": 52
+      },
+      {
+        "name": "sidebar.tsx",
+        "degree": 46
+      },
+      {
+        "name": "PaymentCalculator.tsx",
+        "degree": 43
+      },
+      {
+        "name": "FondsDeRoulement.tsx",
+        "degree": 41
+      }
+    ]
+  },
+  {
+    "id": "repl-agent-objective",
+    "name": "Repl-Agent-Objective",
+    "description": "Cloned & graphed from a Git URL",
+    "path": "git:Repl-Agent-Objective",
+    "graphPath": "/Users/matthieugariepy/Agentic-OS/src/data/graphs/repl-agent-objective.json",
+    "lang": "TypeScript",
+    "color": "#fbbf24",
+    "nodeCount": 828,
+    "edgeCount": 1863,
+    "communities": 43,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "cn()",
+        "degree": 96
+      },
+      {
+        "name": "schema.ts",
+        "degree": 74
+      },
+      {
+        "name": "dependencies",
+        "degree": 68
+      },
+      {
+        "name": "new.tsx",
+        "degree": 62
+      },
+      {
+        "name": "new.tsx",
+        "degree": 56
+      },
+      {
+        "name": "App.tsx",
+        "degree": 52
+      }
+    ]
+  },
+  {
+    "id": "ic-landing-fonds",
+    "name": "ic-landing-fonds",
+    "description": "Cloned & graphed from a Git URL",
+    "path": "git:ic-landing-fonds",
+    "graphPath": "/Users/matthieugariepy/Agentic-OS/src/data/graphs/ic-landing-fonds.json",
+    "lang": "TypeScript",
+    "color": "#34d399",
+    "nodeCount": 647,
+    "edgeCount": 1045,
+    "communities": 46,
+    "extractedPct": 100,
+    "godNodes": [
+      {
+        "name": "cn()",
+        "degree": 138
+      },
+      {
+        "name": "dependencies",
+        "degree": 64
+      },
+      {
+        "name": "utils.ts",
+        "degree": 52
+      },
+      {
+        "name": "sidebar.tsx",
+        "degree": 46
+      },
+      {
+        "name": "FondsDeRoulement.tsx",
+        "degree": 45
+      },
+      {
+        "name": "PaymentCalculator.tsx",
+        "degree": 36
+      }
+    ]
   }
 ]
