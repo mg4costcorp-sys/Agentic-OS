@@ -267,7 +267,7 @@ function buildPlistXml(hour: number, minute: number): string {
     <string>${xmlEscape(`${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`)}</string>
     <key>HOME</key>
     <string>${xmlEscape(HOME)}</string>
-  </dict>
+${headlessAuthEnvEntries()}  </dict>
 
   <key>StandardOutPath</key>
   <string>${xmlEscape(LOG_PATH)}</string>
@@ -341,6 +341,41 @@ function warnIfDreamSkillMissing() {
     console.warn(`[install-dream] Then re-run: bun run install-dream`);
     console.warn("");
   }
+}
+
+/**
+ * launchd starts the job from a bare environment — it never sources a shell
+ * profile — so a token exported in the user's terminal is invisible to the
+ * cron. The installer told the user to run `claude setup-token` and then threw
+ * the result away, generating a plist with only PATH and HOME: the job fired
+ * daily and 401'd forever. (Matthieu's plist carried a hand-added token for
+ * exactly this reason, which a reinstall would silently have deleted.)
+ *
+ * So: carry the credential from THIS process's environment into the plist, and
+ * failing that, preserve whatever the existing plist already had — a reinstall
+ * must never be the thing that logs the cron out. The value only ever moves
+ * from the user's own shell into their own LaunchAgent; nothing is printed.
+ */
+function headlessAuthEnvEntries(): string {
+  const keys = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
+  let existing: Record<string, string> = {};
+  try {
+    if (existsSync(PLIST_PATH)) {
+      const xml = readFileSync(PLIST_PATH, "utf-8");
+      for (const k of keys) {
+        const m = xml.match(new RegExp(`<key>${k}</key>\\s*<string>([^<]*)</string>`));
+        if (m?.[1]) existing[k] = m[1];
+      }
+    }
+  } catch {
+    /* an unreadable plist is not a reason to fail the install */
+  }
+  let out = "";
+  for (const k of keys) {
+    const v = process.env[k] || existing[k];
+    if (v) out += `    <key>${k}</key>\n    <string>${xmlEscape(v)}</string>\n`;
+  }
+  return out;
 }
 
 // `claude -p` (headless print mode) does NOT use OAuth — confirmed against
