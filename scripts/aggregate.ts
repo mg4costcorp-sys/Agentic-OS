@@ -1373,6 +1373,26 @@ interface SkillStat {
   lastUsedMs: number; // raw timestamp for sorting
 }
 
+// Dream's 2026-09-11 run caught this aggregator inflating usage: a former
+// "Method 2" counted ANY line mentioning a `/skills/<name>/SKILL.md` path as
+// a use of that skill — including a single bulk skill-discovery/inventory
+// event that names dozens of skills in one line (e.g. every skill the
+// session has available, printed once at session start). One such line
+// bumped 27 skills' totals by 1 each, all stamped with that one line's
+// timestamp — exactly the "27 skills share an identical lastUsedMs" pattern
+// Dream flagged. Measured against this machine's real logs: that inflated
+// "uses7d" sum from 8 (real) to 52 (buggy) — an 85% false positive rate.
+//
+// Fixed: the ONLY source of an invocation count now is an explicit
+// slash-command event — `type: "user"` messages whose text either carries
+// Claude Code's own `<command-name>/foo</command-name>` wrapper (how a
+// recognized command, interactive or `claude -p "/foo"` from a cron, is
+// actually recorded — NOT as literal "/foo" text, which the previous
+// regex-only check here was wrongly assuming) or, as a fallback, literal
+// `/foo` text a user typed that didn't resolve to a registered command
+// (e.g. wrong casing — this repo has hit that exact "/Todo" vs "/todo"
+// case before). Reading a SKILL.md file is no longer usage signal at all;
+// it was never a reliable one.
 async function extractSkillUsage(): Promise<SkillStat[]> {
   const now = Date.now();
   const SEVEN_D = 7 * 24 * 60 * 60 * 1000;
@@ -1380,12 +1400,8 @@ async function extractSkillUsage(): Promise<SkillStat[]> {
 
   const files = await walkJsonl(PROJECTS_DIR);
 
-  // ---- Method 1: Slash-command invocations (user types /command) ----
-  const slashRe = /^\s*\/([a-zA-Z][a-zA-Z0-9_-]{1,40})(?:\s|$)/;
-
-  // ---- Method 2: SKILL.md file reads (skills system loads them) ----
-  // Matches paths like /skills/<name>/SKILL.md or /.claude/skills/<name>/
-  const skillReadRe = /\/skills\/([a-zA-Z][a-zA-Z0-9_-]{1,60})\/SKILL\.md/;
+  const commandNameRe = /<command-name>\s*\/([a-zA-Z][a-zA-Z0-9_-]{1,60})\s*<\/command-name>/;
+  const literalSlashRe = /^\s*\/([a-zA-Z][a-zA-Z0-9_-]{1,40})(?:\s|$)/;
 
   for (const file of files) {
     let fileBody: string;
@@ -1395,72 +1411,39 @@ async function extractSkillUsage(): Promise<SkillStat[]> {
       continue;
     }
 
-    // Track per-conversation to avoid double-counting multiple reads in one session
-    const seenInConv = new Set<string>();
-    let convTs = 0;
-
     for (const line of fileBody.split("\n")) {
-      if (!line.trim()) continue;
+      if (!line.trim() || !line.includes('"/')) continue;
       let row: any;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (row.type !== "user" || row.message?.role !== "user") continue;
 
-      // Method 1: Check for /slash command from user
-      if (line.includes('"/')) {
-        try {
-          row = row ?? JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (row.type === "user" && row.message?.role === "user") {
-          let text = "";
-          const msgContent = row.message?.content;
-          if (typeof msgContent === "string") {
-            text = msgContent;
-          } else if (Array.isArray(msgContent)) {
-            for (const c of msgContent) {
-              if (typeof c === "string") { text = c; break; }
-              if (c?.type === "text" && typeof c.text === "string") { text = c.text; break; }
-            }
-          }
-          const m = text.match(slashRe);
-          if (m) {
-            const cmd = `/${m[1]}`;
-            const ts = row.timestamp ? new Date(row.timestamp).getTime() : 0;
-            if (!stats[cmd]) stats[cmd] = { uses7d: 0, total: 0, lastMs: 0 };
-            stats[cmd].total++;
-            if (ts) {
-              if (now - ts < SEVEN_D) stats[cmd].uses7d++;
-              if (ts > stats[cmd].lastMs) stats[cmd].lastMs = ts;
-            }
-          }
+      const texts: string[] = [];
+      const msgContent = row.message?.content;
+      if (typeof msgContent === "string") {
+        texts.push(msgContent);
+      } else if (Array.isArray(msgContent)) {
+        for (const c of msgContent) {
+          if (typeof c === "string") texts.push(c);
+          else if (c?.type === "text" && typeof c.text === "string") texts.push(c.text);
         }
       }
 
-      // Method 2: Check for SKILL.md file reads (any message type)
-      if (line.includes("SKILL.md")) {
-        try {
-          row = row ?? JSON.parse(line);
-        } catch {
-          continue;
-        }
-        const ts = row.timestamp ? new Date(row.timestamp).getTime() : 0;
-        if (ts) convTs = ts;
-        // Search the entire line for skill path references
-        const matches = line.matchAll(/\/skills\/([a-zA-Z][a-zA-Z0-9_-]{1,60})\/SKILL\.md/g);
-        for (const match of matches) {
-          const skillName = `/${match[1]}`;
-          // Only count once per conversation file to avoid inflation
-          const convKey = `${file}:${skillName}`;
-          if (seenInConv.has(convKey)) continue;
-          seenInConv.add(convKey);
+      const cmd = texts
+        .map((text) => commandNameRe.exec(text)?.[1] ?? literalSlashRe.exec(text)?.[1])
+        .find(Boolean);
+      if (!cmd) continue;
 
-          const useTs = ts || convTs;
-          if (!stats[skillName]) stats[skillName] = { uses7d: 0, total: 0, lastMs: 0 };
-          stats[skillName].total++;
-          if (useTs) {
-            if (now - useTs < SEVEN_D) stats[skillName].uses7d++;
-            if (useTs > stats[skillName].lastMs) stats[skillName].lastMs = useTs;
-          }
-        }
+      const name = `/${cmd}`;
+      const ts = row.timestamp ? new Date(row.timestamp).getTime() : 0;
+      if (!stats[name]) stats[name] = { uses7d: 0, total: 0, lastMs: 0 };
+      stats[name].total++;
+      if (ts) {
+        if (now - ts < SEVEN_D) stats[name].uses7d++;
+        if (ts > stats[name].lastMs) stats[name].lastMs = ts;
       }
     }
   }
