@@ -787,7 +787,7 @@ const STALE_DAYS = 10;
 
 type MemKind = "hub" | "workspace" | "file" | "decision" | "session" | "skill" | "vector_store";
 type MemStatus = "healthy" | "stale" | "missing";
-type MemSource = "obsidian" | "claude" | "pinecone";
+type MemSource = "obsidian" | "claude" | "pinecone" | "local";
 
 interface MemNode {
   id: string;
@@ -1329,6 +1329,33 @@ async function fetchPineconeIndexes(): Promise<PineconeIndex[]> {
       .map((r) => r.value);
   } catch {
     return [];
+  }
+}
+
+// LOCAL VECTOR INDEX — reads the manifest scripts/local-embed.ts writes to
+// ~/.claude-os/vector-index.manifest.json. This is a completely separate,
+// local-first alternative to the Pinecone polling above: no API key, no
+// network call here (the model only phones home once, on the embedding run
+// itself, to download the model — never to read this file), zero cost.
+// Before this existed, "vectors" only ever meant Pinecone's count, so a
+// vault with thousands of files and no Pinecone account always read 0.
+interface LocalVectorIndex {
+  vectorCount: number;
+  model: string;
+  dimension: number;
+  updatedAt: string;
+}
+
+function readLocalVectorIndex(): LocalVectorIndex | null {
+  try {
+    const manifestPath = join(HOME, ".claude-os", "vector-index.manifest.json");
+    if (!existsSync(manifestPath)) return null;
+    const m = JSON.parse(readFileSync(manifestPath, "utf-8"));
+    const vectorCount = Array.isArray(m.files) ? m.files.length : 0;
+    if (vectorCount === 0) return null;
+    return { vectorCount, model: m.model, dimension: m.dimension, updatedAt: m.updatedAt };
+  } catch {
+    return null; // a missing/corrupt local index just means 0 local vectors, not a crash
   }
 }
 
@@ -1996,6 +2023,32 @@ async function parseMemory() {
     });
   }
 
+  // ── Local vector-store node (scripts/local-embed.ts, no API key) ──
+  const localIndex = readLocalVectorIndex();
+  if (localIndex) {
+    const label = "local-embeddings";
+    const id = `local-${slugify(label)}`;
+    nodes.push({
+      id,
+      name: "Vecteurs locaux",
+      kind: "vector_store",
+      source: "local",
+      indexName: label,
+      vectorCount: localIndex.vectorCount,
+      dimension: localIndex.dimension,
+      embeddingModel: localIndex.model,
+      val: 28,
+      color: tonalForIndex(label),
+      meta: `${localIndex.vectorCount.toLocaleString()} vecteurs · local, 0 $ · ${localIndex.model}`,
+    });
+    links.push({ source: "hub", target: id, kind: "vector" });
+    sourceList.push({
+      kind: "local",
+      label: "Vecteurs locaux",
+      vectorCount: localIndex.vectorCount,
+    });
+  }
+
   // ── Skill-event activity feed (recall + wrap-up) ──
   const skillEvents = await extractMemoryEvents(14);
 
@@ -2012,7 +2065,8 @@ async function parseMemory() {
   const activatedLast7d = skillEvents.filter(
     (e) => e.type === "recall" || e.type === "vectorize",
   ).length;
-  const totalVectors = pineconeIndexes.reduce((a, i) => a + i.totalVectorCount, 0);
+  const totalVectors =
+    pineconeIndexes.reduce((a, i) => a + i.totalVectorCount, 0) + (localIndex?.vectorCount ?? 0);
   const totalDataSources = sourceList.length;
 
   // ── Type distribution ──
@@ -2072,6 +2126,7 @@ async function parseMemory() {
         vectorCount: ns.vectorCount,
       })),
     })),
+    local: localIndex,
     recentlyUpdated: allFiles
       .slice()
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -4055,6 +4110,17 @@ async function main() {
           title: sanitize(first.name) ?? first.name,
           detail: `${memory.pinecone.length} indexes · ${totalVectors.toLocaleString()} vectors`,
           brand: "FFFFFF",
+          color: "1F1F1F",
+          connected: true,
+        });
+      }
+      if (memory?.local?.vectorCount > 0) {
+        out.push({
+          kind: "local-vectors",
+          slug: "local-vectors",
+          title: "Vecteurs locaux",
+          detail: `${memory.local.vectorCount.toLocaleString()} vecteurs · local, 0 $ · ${memory.local.model}`,
+          brand: "8be9c7",
           color: "1F1F1F",
           connected: true,
         });

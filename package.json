@@ -23,6 +23,7 @@
     "format": "prettier --write .",
     "seed:data": "bun run scripts/seed-data.ts",
     "aggregate": "bun run scripts/aggregate.ts",
+    "embed:local": "bun run scripts/local-embed.ts",
     "refresh:models": "bun run scripts/refresh-model-intel.ts",
     "install-dream": "bun run scripts/install-dream-cron.ts",
     "uninstall-dream": "bun run scripts/install-dream-cron.ts --uninstall"
@@ -30,6 +31,7 @@
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.5",
     "@hookform/resolvers": "^5.2.2",
+    "@huggingface/transformers": "^4.2.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-aspect-ratio": "^1.1.8",
@@ -71,6 +73,9 @@
     "input-otp": "^1.4.2",
     "js-yaml": "^4.1.1",
     "lucide-react": "^0.575.0",
+    "onnxruntime-common": "^1.29.0",
+    "onnxruntime-node": "^1.29.0",
+    "onnxruntime-web": "^1.29.0",
     "react": "^19.2.0",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.0",
@@ -106,5 +111,10 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^7.3.1"
-  }
+  },
+  "trustedDependencies": [
+    "onnxruntime-node",
+    "protobufjs",
+    "sharp"
+  ]
 }
