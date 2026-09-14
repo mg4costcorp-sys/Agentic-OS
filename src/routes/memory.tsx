@@ -9,7 +9,7 @@ import {
 } from "@/lib/mock-data";
 import { useLiveData } from "@/lib/use-live-data";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { FileText, AlertTriangle, RefreshCw, X, Pencil, Cloud, Search, Copy, Check, Maximize2 } from "lucide-react";
+import { FileText, AlertTriangle, RefreshCw, X, Pencil, Cloud, Search, Copy, Check, Maximize2, Loader2, Sparkles } from "lucide-react";
 import { MemoryBrain } from "@/components/memory-brain";
 import type { MemNode } from "@/components/memory-graph-3d";
 import { MemoryGraphLoader } from "@/components/memory-graph-loader";
@@ -275,6 +275,9 @@ function MemoryPage() {
         </div>
       </header>
 
+      {/* Semantic search — local vectors, no API key (scripts/local-embed.ts) */}
+      <SemanticSearch />
+
       {/* Source filter pills */}
       <SourceFilter activeSet={activeSet} allOn={allOn} onToggle={toggleSource} />
 
@@ -521,6 +524,240 @@ function SourceFilter({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+interface SearchResult {
+  path: string;
+  relPath: string;
+  title: string;
+  score: number;
+  snippet: string;
+}
+
+/** "Search by meaning" over scripts/local-embed.ts's local vector index —
+ *  no API key, nothing leaves the machine except the embedding model's
+ *  one-time download. Hits /__local_search (vite.config.ts), which embeds
+ *  the query with the same model + text-cleanup the index was built with. */
+function SemanticSearch() {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResult[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [totalVectors, setTotalVectors] = useState<number | null>(null);
+  const [openNote, setOpenNote] = useState<SearchResult | null>(null);
+
+  const runSearch = async () => {
+    const q = query.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const tokRaw = await fetch("/__token").then((r) => r.json());
+      const token = tokRaw?.token ?? tokRaw;
+      const r = await fetch("/__local_search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-claude-os-token": token },
+        body: JSON.stringify({ query: q, topK: 8 }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        setError(String(data?.error ?? `search failed (${r.status})`));
+        setResults(null);
+        return;
+      }
+      setResults(data.results ?? []);
+      setTotalVectors(typeof data.totalVectors === "number" ? data.totalVectors : null);
+    } catch (e: any) {
+      setError(e?.message ?? "network error");
+      setResults(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-border bg-card overflow-hidden mb-6">
+      <div className="px-6 pt-4">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground mb-1 inline-flex items-center gap-1.5">
+          <Sparkles className="h-3 w-3" style={{ color: "#8be9c7" }} />
+          Semantic search
+        </div>
+        <div className="text-xs text-muted-foreground mb-3">
+          Search your notes by meaning, not filename — local, free, no API key.
+          {totalVectors != null && (
+            <span className="text-muted-foreground/60">
+              {" "}
+              · {totalVectors.toLocaleString()} notes indexed
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="px-6 pb-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void runSearch();
+            }}
+            placeholder='e.g. "what did we decide about the Picbois pricing"'
+            aria-label="Semantic search across your memory vault"
+            className="w-full rounded-full border border-border/70 bg-background/40 pl-10 pr-28 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30"
+          />
+          <button
+            onClick={() => void runSearch()}
+            disabled={loading || !query.trim()}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all disabled:opacity-40"
+            style={{
+              border: "1px solid rgba(139,233,199,0.5)",
+              background: "linear-gradient(160deg, rgba(139,233,199,0.16), rgba(139,233,199,0.05))",
+              color: "#8be9c7",
+            }}
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Search className="h-3.5 w-3.5" />
+            )}
+            {loading ? "Searching…" : "Search"}
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-3 text-xs text-amber-500">
+            {error.includes("embed:local") ? (
+              <>
+                No local vector index yet — run{" "}
+                <code className="font-mono text-foreground/80">bun run embed:local</code> in the
+                Terminal tab, then try again.
+              </>
+            ) : (
+              error
+            )}
+          </div>
+        )}
+
+        {results && results.length > 0 && (
+          <ul className="mt-4 divide-y divide-border border-t border-border">
+            {results.map((r) => (
+              <li key={r.path}>
+                <button
+                  onClick={() => setOpenNote(r)}
+                  className="w-full text-left py-3 hover:bg-foreground/[0.03] transition-colors flex items-start gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-foreground truncate">{r.title}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                      {r.snippet}
+                    </div>
+                    <div className="text-[10px] font-mono text-muted-foreground/50 mt-1 truncate">
+                      {r.relPath}
+                    </div>
+                  </div>
+                  <div
+                    className="shrink-0 text-[10px] font-semibold tabular-nums rounded-full px-2 py-0.5 mt-0.5"
+                    style={{ background: "rgba(139,233,199,0.12)", color: "#8be9c7" }}
+                    title="Cosine similarity to your query"
+                  >
+                    {Math.round(r.score * 100)}%
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {results && results.length === 0 && !error && (
+          <div className="mt-4 text-xs text-muted-foreground text-center py-4">No matches.</div>
+        )}
+      </div>
+
+      {openNote && <NotePreviewModal result={openNote} onClose={() => setOpenNote(null)} />}
+    </section>
+  );
+}
+
+function NotePreviewModal({ result, onClose }: { result: SearchResult; onClose: () => void }) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/__memory_note?vault=&id=${encodeURIComponent(result.title)}`)
+      .then((r) => r.json())
+      .then((r) => {
+        if (cancelled) return;
+        setContent(r?.ok && typeof r.content === "string" ? r.content : result.snippet);
+      })
+      .catch(() => {
+        if (!cancelled) setContent(result.snippet);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [result.title]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content ?? "");
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard denied — button just doesn't confirm */
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-background/60 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full md:max-w-2xl max-h-[80vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-border bg-card shadow-2xl m-0 md:m-6 animate-scale-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between p-5 border-b border-border shrink-0">
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground mb-1">
+              {Math.round(result.score * 100)}% match
+            </div>
+            <div className="text-base font-semibold tracking-tight truncate">{result.title}</div>
+            <div className="text-[10px] font-mono text-muted-foreground/60 mt-0.5 truncate">
+              {result.relPath}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => void copy()}
+              className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-colors"
+              style={{
+                borderColor: copied ? "#3ddc97" : "rgba(255,255,255,0.14)",
+                background: copied ? "rgba(61,220,151,0.12)" : "rgba(255,255,255,0.03)",
+                color: copied ? "#3ddc97" : undefined,
+              }}
+              title="Copy this note to your clipboard"
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+          {loading ? "Loading…" : content}
+        </div>
+      </div>
     </div>
   );
 }

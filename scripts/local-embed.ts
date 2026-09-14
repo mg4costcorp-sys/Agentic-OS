@@ -23,42 +23,39 @@
  * Incremental: a file whose content hash hasn't changed since the last run
  * reuses its stored vector instead of re-embedding.
  *
+ * The dashboard's "Semantic search" panel (Memory page → /__local_search in
+ * vite.config.ts) reads the files this script writes — run this again after
+ * adding/editing notes to keep search results current. shared reader/model
+ * logic lives in src/lib/local-vector-index.ts so search and indexing can
+ * never encode text two different ways.
+ *
  * Usage:
  *   bun run scripts/local-embed.ts
+ *   bun run embed:local
  *   bun run scripts/local-embed.ts --vault "/path/to/other/vault"
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { pipeline } from "@huggingface/transformers";
+import {
+  LOCAL_EMBED_MODEL_ID,
+  LOCAL_EMBED_DIM,
+  VECTOR_MANIFEST_PATH,
+  VECTOR_BIN_PATH,
+  toPlainText,
+  loadEmbedder,
+  loadManifest,
+  loadVectors,
+  type VectorManifest,
+  type VectorManifestFile,
+} from "../src/lib/local-vector-index";
 
 const HOME = homedir();
-const STATE_DIR = join(HOME, ".claude-os");
-const MANIFEST_PATH = join(STATE_DIR, "vector-index.manifest.json");
-const BIN_PATH = join(STATE_DIR, "vector-index.bin");
-const MODEL_ID = "Xenova/all-MiniLM-L6-v2";
-const MODEL_DIM = 384;
 
 const MAX_CHARS = 2000; // plenty for a 256-token model; keeps inference fast.
 const PROGRESS_EVERY = 200;
 const SAVE_EVERY = 500; // checkpoint so a long run can be interrupted safely.
-
-interface ManifestFile {
-  path: string; // absolute path
-  hash: string;
-  mtimeMs: number;
-  bytes: number;
-}
-
-interface Manifest {
-  model: string;
-  dimension: number;
-  vaultRoot: string;
-  createdAt: string;
-  updatedAt: string;
-  files: ManifestFile[];
-}
 
 function parseArgs(argv: string[]): { vaultOverride?: string } {
   const i = argv.indexOf("--vault");
@@ -114,40 +111,12 @@ function walkMd(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** Strip frontmatter + markdown syntax down to prose — the embedding model
- *  reads meaning, not formatting. */
-function toPlainText(raw: string): string {
-  const withoutFrontmatter = raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  return withoutFrontmatter
-    .replace(/```[\s\S]*?```/g, " ") // code fences
-    .replace(/\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g, "$1") // [[wikilinks]]
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // [text](url)
-    .replace(/[*_`>#]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function loadOldManifest(): Manifest | null {
-  if (!existsSync(MANIFEST_PATH) || !existsSync(BIN_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(MANIFEST_PATH, "utf-8"));
-  } catch {
-    return null;
-  }
-}
-
-function oldVectorByPath(old: Manifest | null): Map<string, Float32Array> {
+function oldVectorByPath(old: VectorManifest | null): Map<string, Float32Array> {
   const map = new Map<string, Float32Array>();
-  if (!old) return map;
-  try {
-    const buf = readFileSync(BIN_PATH);
-    const all = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
-    old.files.forEach((f, i) => {
-      map.set(f.path, all.slice(i * old.dimension, (i + 1) * old.dimension));
-    });
-  } catch {
-    /* a corrupt/short bin just means everything re-embeds */
-  }
+  if (!old || old.dimension !== LOCAL_EMBED_DIM) return map;
+  const vectors = loadVectors(old);
+  if (!vectors) return map;
+  old.files.forEach((f, i) => map.set(f.path, vectors[i]));
   return map;
 }
 
@@ -163,32 +132,34 @@ async function main() {
     return;
   }
 
-  const old = loadOldManifest();
-  const oldVectors = oldVectorByPath(old && old.dimension === MODEL_DIM ? old : null);
+  const old = loadManifest();
+  const oldVectors = oldVectorByPath(old);
   const oldHashByPath = new Map((old?.files ?? []).map((f) => [f.path, f.hash]));
 
-  console.log(`[local-embed] loading ${MODEL_ID} (first run downloads ~90 MB, cached after)...`);
-  const extractor = await pipeline("feature-extraction", MODEL_ID, { dtype: "fp32" });
+  console.log(
+    `[local-embed] loading ${LOCAL_EMBED_MODEL_ID} (first run downloads ~90 MB, cached after)...`,
+  );
+  const extractor = await loadEmbedder();
 
-  const manifestFiles: ManifestFile[] = [];
+  const manifestFiles: VectorManifestFile[] = [];
   const vectors: Float32Array[] = [];
   let reused = 0;
   let embedded = 0;
   let skippedEmpty = 0;
 
   const flush = () => {
-    const combined = new Float32Array(vectors.length * MODEL_DIM);
-    vectors.forEach((v, i) => combined.set(v, i * MODEL_DIM));
-    writeFileSync(BIN_PATH, Buffer.from(combined.buffer));
-    const manifest: Manifest = {
-      model: MODEL_ID,
-      dimension: MODEL_DIM,
+    const combined = new Float32Array(vectors.length * LOCAL_EMBED_DIM);
+    vectors.forEach((v, i) => combined.set(v, i * LOCAL_EMBED_DIM));
+    writeFileSync(VECTOR_BIN_PATH, Buffer.from(combined.buffer));
+    const manifest: VectorManifest = {
+      model: LOCAL_EMBED_MODEL_ID,
+      dimension: LOCAL_EMBED_DIM,
       vaultRoot,
       createdAt: old?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       files: manifestFiles,
     };
-    writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
+    writeFileSync(VECTOR_MANIFEST_PATH, JSON.stringify(manifest, null, 2));
   };
 
   for (let i = 0; i < files.length; i++) {
@@ -204,7 +175,7 @@ async function main() {
     const hash = Bun.hash(content).toString(16);
 
     const reusable = oldHashByPath.get(path) === hash ? oldVectors.get(path) : undefined;
-    if (reusable && reusable.length === MODEL_DIM) {
+    if (reusable && reusable.length === LOCAL_EMBED_DIM) {
       vectors.push(reusable);
       reused++;
     } else {
@@ -230,8 +201,8 @@ async function main() {
     `[local-embed] done — ${manifestFiles.length} vectors total ` +
       `(${embedded} embedded, ${reused} reused, ${skippedEmpty} empty notes embedded by filename)`,
   );
-  console.log(`[local-embed] wrote ${MANIFEST_PATH}`);
-  console.log(`[local-embed] wrote ${BIN_PATH}`);
+  console.log(`[local-embed] wrote ${VECTOR_MANIFEST_PATH}`);
+  console.log(`[local-embed] wrote ${VECTOR_BIN_PATH}`);
 }
 
 main().catch((e) => {

@@ -50,6 +50,18 @@ import {
 // "anthropic". Same module as the browser uses, so client and server can never
 // disagree about who is being billed.
 import { laneFor, usageLaneLabel, type Lane } from "./src/lib/model-lane";
+// Local-first semantic search over scripts/local-embed.ts's vector index —
+// see that file's header for why it exists (Pinecone-only "vectors" reading
+// 0 with no API key). Same module the embed script imports, so a query and
+// an indexed note are guaranteed to be encoded the same way.
+import {
+  loadManifest,
+  loadVectors,
+  embedText,
+  cosineTopK,
+  toPlainText,
+  readSnippet,
+} from "./src/lib/local-vector-index";
 
 // ── Cross-platform binary resolution (Windows support) ──
 // The Hermes page probes for the hermes / graphify CLIs and a venv Python. On
@@ -13612,6 +13624,91 @@ export default defineConfig({
               res.statusCode = 500;
               res.end(JSON.stringify({ error: err?.message ?? "read failed" }));
             }
+          });
+
+          // POST /__local_search { query, topK? } — semantic search over the
+          // vector index scripts/local-embed.ts writes to ~/.claude-os/. No
+          // API key, no network call except the embedding model's one-time
+          // download (cached after). Embeds the query with the exact same
+          // model + text-cleanup as the index (src/lib/local-vector-index.ts,
+          // imported by both), then ranks every note by cosine similarity —
+          // a plain dot product, since indexed vectors are pre-normalized.
+          // Brute-force over ~4-5k notes is comfortably sub-50ms; this isn't
+          // built to scale past one operator's vault.
+          server.middlewares.use("/__local_search", (req, res, next) => {
+            if (req.method !== "POST") return next();
+            res.setHeader("Content-Type", "application/json");
+            if (!isLoopback(req)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "loopback only" }));
+              return;
+            }
+            if (req.headers["x-claude-os-token"] !== REFRESH_TOKEN) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: "bad token" }));
+              return;
+            }
+            void (async () => {
+              let body = "";
+              for await (const chunk of req as any) body += chunk;
+              let p: { query?: string; topK?: number };
+              try {
+                p = JSON.parse(body || "{}");
+              } catch {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: "invalid json" }));
+                return;
+              }
+              const query = String(p.query ?? "").trim().slice(0, 2000);
+              const topK = Math.min(Math.max(Number(p.topK) || 8, 1), 30);
+              if (!query) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: "empty query" }));
+                return;
+              }
+              const manifest = loadManifest();
+              if (!manifest || manifest.files.length === 0) {
+                res.statusCode = 404;
+                res.end(
+                  JSON.stringify({
+                    error: "no local vector index yet — run: bun run embed:local",
+                  }),
+                );
+                return;
+              }
+              const vectors = loadVectors(manifest);
+              if (!vectors) {
+                res.statusCode = 500;
+                res.end(
+                  JSON.stringify({ error: "vector-index.bin is missing or doesn't match the manifest — re-run: bun run embed:local" }),
+                );
+                return;
+              }
+              try {
+                const queryVector = await embedText(toPlainText(query) || query);
+                const hits = cosineTopK(queryVector, manifest, vectors, topK);
+                const vaultRoot = manifest.vaultRoot;
+                res.end(
+                  JSON.stringify({
+                    ok: true,
+                    model: manifest.model,
+                    totalVectors: manifest.files.length,
+                    results: hits.map((h) => ({
+                      path: h.path,
+                      relPath: h.path.startsWith(vaultRoot)
+                        ? h.path.slice(vaultRoot.length).replace(/^[\\/]/, "")
+                        : h.path,
+                      title: (h.path.split(/[\\/]/).pop() ?? h.path).replace(/\.md$/i, ""),
+                      score: Math.round(h.score * 1000) / 1000,
+                      snippet: readSnippet(h.path),
+                    })),
+                  }),
+                );
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: err?.message ?? "search failed" }));
+              }
+            })();
           });
 
           // GET /__hermes_memory — universal memory readout for whichever
