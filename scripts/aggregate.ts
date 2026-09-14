@@ -3618,6 +3618,31 @@ async function main() {
       }
     : null;
 
+  // Real, flat-rate dollars billed this month — computed once here so it can
+  // be reused both in `subscriptions.*.monthlyPrice` and in `costSummary`
+  // below, instead of the two ever drifting apart.
+  const claudeMonthlyPriceUsd =
+    claude.planGuess === "Claude Pro" ? 20 : claude.planGuess === "Claude Max 5x" ? 100 : 200;
+  const chatgptMonthlyPriceUsd = chatgpt.present ? ((chatgpt as any).monthlyPrice ?? 20) : 0;
+  // Codex and OpenRouter are $0 "flat" today (Codex rides the ChatGPT OAuth
+  // session with no separate charge detected; OpenRouter is pay-as-you-go,
+  // not a flat monthly price) — both already reflected as 0 below.
+  const flatMonthlySpendUsd = claudeMonthlyPriceUsd + chatgptMonthlyPriceUsd;
+
+  const modelUsageEntries = Object.entries(parsed.modelTokens)
+    .map(([model, t]) => ({
+      model,
+      messages: t.messages,
+      input_tokens: t.input_tokens,
+      output_tokens: t.output_tokens,
+      cache_read_input_tokens: t.cache_read_input_tokens,
+      cache_creation_input_tokens: t.cache_creation_input_tokens,
+      api_equivalent_usd: Math.round(computeCost(model, t) * 100) / 100,
+    }))
+    .sort((a, b) => b.api_equivalent_usd - a.api_equivalent_usd);
+  const apiEquivalentUsdAllTime =
+    Math.round(modelUsageEntries.reduce((a, m) => a + m.api_equivalent_usd, 0) * 100) / 100;
+
   const data = {
     generatedAt: new Date().toISOString(),
     summary: {
@@ -3632,8 +3657,7 @@ async function main() {
       claude: {
         ...claude,
         plan: claude.planGuess,
-        monthlyPrice:
-          claude.planGuess === "Claude Pro" ? 20 : claude.planGuess === "Claude Max 5x" ? 100 : 200,
+        monthlyPrice: claudeMonthlyPriceUsd,
         confidence: claude.planConfidence,
         evidence: claude.evidence,
       },
@@ -3641,7 +3665,7 @@ async function main() {
         ? {
             ...chatgpt,
             plan: (chatgpt as any).planName ?? "ChatGPT Plus",
-            monthlyPrice: (chatgpt as any).monthlyPrice ?? 20,
+            monthlyPrice: chatgptMonthlyPriceUsd,
             confidence: (chatgpt as any).confidence ?? "low",
             evidence: [
               `OAuth detected via ~/.codex/auth.json`,
@@ -3686,17 +3710,27 @@ async function main() {
           }
         : null,
     },
-    modelUsage: Object.entries(parsed.modelTokens)
-      .map(([model, t]) => ({
-        model,
-        messages: t.messages,
-        input_tokens: t.input_tokens,
-        output_tokens: t.output_tokens,
-        cache_read_input_tokens: t.cache_read_input_tokens,
-        cache_creation_input_tokens: t.cache_creation_input_tokens,
-        cost_usd: Math.round(computeCost(model, t) * 100) / 100,
-      }))
-      .sort((a, b) => b.cost_usd - a.cost_usd),
+    // api_equivalent_usd (was `cost_usd`) is what this token usage WOULD cost
+    // at pay-per-token API pricing — never what the operator actually paid.
+    // On a flat-rate plan (Claude Max, ChatGPT Plus, etc.) every one of these
+    // tokens is already prepaid by subscriptions.*.monthlyPrice below; this
+    // number tracks value/leverage, not spend. Dream's 2026-09-11 run named
+    // the old field name as actively misleading (it read its own $6,477.69
+    // all-time sum as a spend total) — renamed for anyone reading this file
+    // raw, and see `costSummary` for the two totals side by side with the
+    // distinction spelled out in one place.
+    modelUsage: modelUsageEntries,
+    costSummary: {
+      actualMonthlySpendUsd: flatMonthlySpendUsd,
+      apiEquivalentUsdAllTime,
+      note:
+        "actualMonthlySpendUsd is real money billed by flat-rate subscriptions " +
+        "(subscriptions.*.monthlyPrice) — what the operator actually pays per month. " +
+        "apiEquivalentUsdAllTime is what modelUsage[]'s token usage would cost at " +
+        "pay-per-token API pricing, summed across all models, all time — not money " +
+        "actually spent, since that usage is already covered by the flat subscription " +
+        "above. Never add these two together.",
+    },
     daily: Object.entries(parsed.dayBucket)
       .map(([day, v]) => ({
         day,
